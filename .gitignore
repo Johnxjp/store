@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+data/
+resources/bin/
+native/*/.build/
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
