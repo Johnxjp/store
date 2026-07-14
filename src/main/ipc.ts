@@ -1,59 +1,93 @@
 import { ipcMain, type WebContents } from 'electron'
-import { mkdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IPC } from '../shared/ipc-channels'
-import type { PipelineStage, RecordingResult } from '../shared/types'
-import { mergeTranscripts } from './merge'
-import { audioCaptureBin, modelPath, recordingsDir } from './paths'
-import { Recorder, type RecorderAnchors } from './recorder'
-import { convertTo16k, transcribeWav } from './transcribe'
+import type { Meeting, MeetingDetail, PipelineStage } from '../shared/types'
+import * as db from './db'
+import { audioCaptureBin, recordingsDir } from './paths'
+import { runPipeline, writeSessionFile } from './pipeline'
+import { Recorder } from './recorder'
 
 interface Session {
   recorder: Recorder
-  dir: string
-  anchors: RecorderAnchors
+  meetingId: string
 }
 
 let session: Session | null = null
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle(IPC.recordingStart, async () => {
+  ipcMain.handle(IPC.recordingStart, async (): Promise<Meeting> => {
     if (session) throw new Error('already recording')
-    const dir = join(recordingsDir, new Date().toISOString().replace(/[:.]/g, '-'))
+    const id = randomUUID()
+    const dir = join(recordingsDir, id)
     await mkdir(dir, { recursive: true })
+
     const recorder = new Recorder(audioCaptureBin)
     const anchors = await recorder.start(dir)
-    session = { recorder, dir, anchors }
+    await writeSessionFile(dir, anchors)
+
+    const now = Date.now()
+    const meeting = db.createMeeting({
+      id,
+      title: `Meeting ${new Date(now).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })}`,
+      audioDir: dir,
+      startedAt: now
+    })
+    session = { recorder, meetingId: id }
+    return meeting
   })
 
-  ipcMain.handle(IPC.recordingStop, async (event): Promise<RecordingResult> => {
+  ipcMain.handle(IPC.recordingStop, async (event): Promise<Meeting> => {
     if (!session) throw new Error('not recording')
-    const { recorder, dir, anchors } = session
+    const { recorder, meetingId } = session
     session = null
 
-    const durationMs = await recorder.stop()
-    const progress = (stage: PipelineStage) => sendProgress(event.sender, stage)
+    await recorder.stop()
+    db.setRecordingEnded(meetingId, Date.now())
 
-    progress('converting')
-    const mic16k = join(dir, 'mic-16k.wav')
-    const system16k = join(dir, 'system-16k.wav')
-    await convertTo16k(join(dir, 'mic.wav'), mic16k)
-    await convertTo16k(join(dir, 'system.wav'), system16k)
+    // Pipeline runs in the background; the renderer follows progress events.
+    void runPipelineNotifying(meetingId, event.sender).catch(() => {})
+    return db.getMeeting(meetingId)!
+  })
 
-    progress('transcribing-mic')
-    const micSegments = await transcribeWav(mic16k, modelPath)
-    progress('transcribing-system')
-    const systemSegments = await transcribeWav(system16k, modelPath)
+  ipcMain.handle(IPC.pipelineRetry, async (event, meetingId: string): Promise<void> => {
+    void runPipelineNotifying(meetingId, event.sender).catch(() => {})
+  })
 
-    progress('merging')
-    const segments = mergeTranscripts(
-      { segments: micSegments, epochMs: anchors.micEpochMs },
-      { segments: systemSegments, epochMs: anchors.systemEpochMs }
-    )
-    return { segments, durationMs }
+  ipcMain.handle(IPC.meetingsList, (): Meeting[] => db.listMeetings())
+
+  ipcMain.handle(IPC.meetingsGet, (_event, id: string): MeetingDetail | null => {
+    const meeting = db.getMeeting(id)
+    if (!meeting) return null
+    return { meeting, transcript: db.getTranscript(id) }
+  })
+
+  ipcMain.handle(IPC.meetingsDelete, async (_event, id: string): Promise<void> => {
+    const meeting = db.getMeeting(id)
+    if (!meeting) return
+    db.deleteMeeting(id)
+    if (meeting.audioDir?.startsWith(recordingsDir)) {
+      await rm(meeting.audioDir, { recursive: true, force: true })
+    }
   })
 }
 
-function sendProgress(sender: WebContents, stage: PipelineStage): void {
-  if (!sender.isDestroyed()) sender.send(IPC.pipelineProgress, stage)
+async function runPipelineNotifying(meetingId: string, sender: WebContents): Promise<void> {
+  const progress = (stage: PipelineStage) => {
+    if (!sender.isDestroyed()) sender.send(IPC.pipelineProgress, { meetingId, stage })
+  }
+  const notifyUpdated = () => {
+    if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, meetingId)
+  }
+  try {
+    await runPipeline(meetingId, progress)
+  } finally {
+    notifyUpdated()
+  }
 }

@@ -38,7 +38,9 @@ struct AudioCaptureMain {
 
         // Both streams deliver buffers continuously (silence included), so
         // waiting for the first buffer of each gives reliable epoch anchors.
-        let deadline = Date().addingTimeInterval(5)
+        // Bluetooth mics can take several seconds to switch into their
+        // hands-free input profile before any buffers flow.
+        let deadline = Date().addingTimeInterval(15)
         while (mic.firstBufferEpochMs == nil || system.firstBufferEpochMs == nil), Date() < deadline {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }

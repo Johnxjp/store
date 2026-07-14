@@ -1,108 +1,131 @@
-import { useEffect, useRef, useState } from 'react'
-import type { PipelineStage, RecordingState, TranscriptSegment } from '../../shared/types'
-
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  converting: 'Preparing audio…',
-  'transcribing-mic': 'Transcribing your audio…',
-  'transcribing-system': 'Transcribing meeting audio…',
-  merging: 'Merging transcript…'
-}
+import { useCallback, useEffect, useState } from 'react'
+import type { Meeting, PipelineStage } from '../../shared/types'
+import { MeetingDetailView } from './views/MeetingDetail'
+import { RecordingView } from './views/RecordingView'
 
 export default function App() {
-  const [state, setState] = useState<RecordingState>('idle')
-  const [stage, setStage] = useState<PipelineStage | null>(null)
-  const [segments, setSegments] = useState<TranscriptSegment[] | null>(null)
+  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [recording, setRecording] = useState<Meeting | null>(null)
+  const [progress, setProgress] = useState<Record<string, PipelineStage>>({})
+  const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [elapsed, setElapsed] = useState(0)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => window.api.onPipelineProgress(setStage), [])
+  const refresh = useCallback(async () => {
+    setMeetings(await window.api.listMeetings())
+    setRefreshKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
-    if (state === 'recording') {
-      const startedAt = Date.now()
-      timerRef.current = setInterval(() => setElapsed(Date.now() - startedAt), 1000)
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
+    void refresh()
+    const offProgress = window.api.onPipelineProgress((p) => {
+      setProgress((prev) => ({ ...prev, [p.meetingId]: p.stage }))
+    })
+    const offUpdated = window.api.onMeetingUpdated(() => {
+      setProgress({})
+      void refresh()
+    })
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
+      offProgress()
+      offUpdated()
     }
-  }, [state])
+  }, [refresh])
 
-  async function start() {
+  async function startRecording() {
     setError(null)
-    setSegments(null)
-    setElapsed(0)
     try {
-      await window.api.startRecording()
-      setState('recording')
+      const meeting = await window.api.startRecording()
+      setRecording(meeting)
+      setSelectedId(meeting.id)
+      await refresh()
     } catch (e) {
       setError(String(e))
-      setState('idle')
     }
   }
 
-  async function stop() {
-    setState('processing')
-    setStage(null)
+  async function stopRecording() {
+    setError(null)
     try {
-      const result = await window.api.stopRecording()
-      setSegments(result.segments)
+      await window.api.stopRecording()
     } catch (e) {
       setError(String(e))
-    } finally {
-      setState('idle')
-      setStage(null)
     }
+    setRecording(null)
+    await refresh()
+  }
+
+  async function deleteMeeting(id: string) {
+    await window.api.deleteMeeting(id)
+    if (selectedId === id) setSelectedId(null)
+    await refresh()
   }
 
   return (
-    <div className="app">
-      <header>
-        <h1>AI Meeting Notes</h1>
-        {state === 'idle' && (
-          <button className="record" onClick={start}>
-            ● Record
-          </button>
-        )}
-        {state === 'recording' && (
-          <button className="stop" onClick={stop}>
-            ■ Stop {formatElapsed(elapsed)}
-          </button>
-        )}
-        {state === 'processing' && (
-          <span className="processing">{stage ? STAGE_LABELS[stage] : 'Processing…'}</span>
-        )}
-      </header>
-
-      {error && <div className="error">{error}</div>}
-
-      {segments && (
-        <section className="transcript">
-          <h2>Transcript</h2>
-          {segments.length === 0 && <p className="empty">No speech detected.</p>}
-          {segments.map((s, i) => (
-            <div key={i} className={`segment ${s.speaker}`}>
-              <span className="ts">{formatElapsed(s.startMs)}</span>
-              <span className="speaker">{s.speaker === 'me' ? 'Me' : 'Them'}</span>
-              <span className="text">{s.text}</span>
-            </div>
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1>Meetings</h1>
+          {recording ? (
+            <button className="stop" onClick={stopRecording}>
+              ■ Stop
+            </button>
+          ) : (
+            <button className="record" onClick={startRecording}>
+              ● Record
+            </button>
+          )}
+        </div>
+        <ul className="meeting-list">
+          {meetings.map((m) => (
+            <li
+              key={m.id}
+              className={m.id === selectedId ? 'selected' : ''}
+              onClick={() => setSelectedId(m.id)}
+            >
+              <span className="meeting-title">{m.title}</span>
+              <StatusBadge meeting={m} stage={progress[m.id]} />
+            </li>
           ))}
-        </section>
-      )}
+          {meetings.length === 0 && <li className="empty">No meetings yet</li>}
+        </ul>
+      </aside>
 
-      {!segments && state === 'idle' && !error && (
-        <p className="empty">Press Record, have a conversation, then Stop to see the transcript.</p>
-      )}
+      <main className="main">
+        {error && <div className="error">{error}</div>}
+        {recording ? (
+          <RecordingView onStop={stopRecording} />
+        ) : selectedId ? (
+          <MeetingDetailView
+            meetingId={selectedId}
+            refreshKey={refreshKey}
+            stage={progress[selectedId]}
+            onDelete={() => deleteMeeting(selectedId)}
+            onRetry={() => window.api.retryPipeline(selectedId)}
+          />
+        ) : (
+          <p className="empty">Select a meeting, or press Record to start a new one.</p>
+        )}
+      </main>
     </div>
   )
 }
 
-function formatElapsed(ms: number): string {
-  const total = Math.floor(ms / 1000)
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+const STAGE_LABELS: Record<PipelineStage, string> = {
+  converting: 'Preparing audio…',
+  'transcribing-mic': 'Transcribing you…',
+  'transcribing-system': 'Transcribing others…',
+  merging: 'Merging…',
+  summarizing: 'Writing notes…'
+}
+
+export function stageLabel(stage: PipelineStage | undefined): string {
+  return stage ? STAGE_LABELS[stage] : 'Processing…'
+}
+
+function StatusBadge({ meeting, stage }: { meeting: Meeting; stage?: PipelineStage }) {
+  if (meeting.status === 'recording') return <span className="badge rec">rec</span>
+  if (meeting.status === 'processing')
+    return <span className="badge processing">{stageLabel(stage)}</span>
+  if (meeting.status === 'error') return <span className="badge err">error</span>
+  return null
 }

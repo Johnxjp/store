@@ -44,16 +44,35 @@ export function mergeTranscripts(
 }
 
 /**
+ * Phrases Whisper's decoder invents on silence — learned from web-video
+ * outros in its training data. Dropped when they are a segment's entire text.
+ */
+const PHRASE_BLOCKLIST = new Set([
+  'thank you',
+  'thank you very much',
+  'thanks for watching',
+  'thank you for watching',
+  'thanks for listening',
+  'please subscribe',
+  'see you next time',
+  'see you in the next video',
+  'bye',
+  'bye bye',
+  'you'
+])
+
+/**
  * Whisper emits artifacts on (near-)silent audio: empty text, bracketed
- * fillers like [BLANK_AUDIO] or (music), and short phrases repeated over and
- * over. Each stream is mostly silence while the other side talks, so these
- * are common here.
+ * fillers like [BLANK_AUDIO] or (music), known silence phrases like
+ * "Thank you.", and short phrases repeated over and over. Each stream is
+ * mostly silence while the other side talks, so these are common here.
  */
 export function dropHallucinations(segments: WhisperSegment[]): WhisperSegment[] {
   const nonEmpty = segments.filter((s) => {
     const t = s.text.trim()
     if (t === '') return false
     if (/^[[(*♪].*[\])*♪]$/.test(t)) return false
+    if (PHRASE_BLOCKLIST.has(t.toLowerCase().replace(/[.!,…]+$/, ''))) return false
     return true
   })
 

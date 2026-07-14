@@ -1,6 +1,9 @@
 import { app, BrowserWindow } from 'electron'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { initDb } from './db'
 import { registerIpcHandlers } from './ipc'
+import { dataDir } from './paths'
 
 const dirname = import.meta.dirname
 
@@ -23,6 +26,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  mkdirSync(dataDir, { recursive: true })
+  initDb(join(dataDir, 'db.sqlite'))
   registerIpcHandlers()
   createWindow()
 

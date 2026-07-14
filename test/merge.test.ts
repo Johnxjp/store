@@ -93,6 +93,17 @@ describe('dropHallucinations', () => {
     const result = dropHallucinations([seg(0, 1, 'the [important] part')])
     expect(result).toHaveLength(1)
   })
+
+  it('drops known silence phrases like "Thank you."', () => {
+    const result = dropHallucinations([
+      seg(0, 1, ' Thank you.'),
+      seg(1, 2, 'Thanks for watching!'),
+      seg(2, 3, 'you'),
+      seg(3, 4, 'Bye.'),
+      seg(4, 5, 'thank you for the update on pricing')
+    ])
+    expect(result.map((s) => s.text)).toEqual(['thank you for the update on pricing'])
+  })
 })
 
 describe('formatting', () => {

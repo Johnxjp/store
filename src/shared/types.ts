@@ -7,11 +7,30 @@ export interface TranscriptSegment {
   text: string
 }
 
-export type RecordingState = 'idle' | 'recording' | 'processing'
+export type MeetingStatus = 'recording' | 'processing' | 'ready' | 'error'
 
-export type PipelineStage = 'converting' | 'transcribing-mic' | 'transcribing-system' | 'merging'
+export interface Meeting {
+  id: string
+  title: string
+  status: MeetingStatus
+  createdAt: number
+  recordingStartedAt: number | null
+  recordingEndedAt: number | null
+  rawNotes: string
+  enhancedNotes: string | null
+  errorMessage: string | null
+  audioDir: string | null
+}
 
-export interface RecordingResult {
-  segments: TranscriptSegment[]
-  durationMs: number
+export type PipelineStage =
+  'converting' | 'transcribing-mic' | 'transcribing-system' | 'merging' | 'summarizing'
+
+export interface PipelineProgress {
+  meetingId: string
+  stage: PipelineStage
+}
+
+export interface MeetingDetail {
+  meeting: Meeting
+  transcript: TranscriptSegment[]
 }
