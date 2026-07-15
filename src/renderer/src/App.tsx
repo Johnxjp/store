@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Meeting, PipelineStage } from '../../shared/types'
+import { ChatIcon, HomeIcon, SearchIcon } from './components/icons'
+import { ChatView } from './views/ChatView'
+import { HomeView } from './views/HomeView'
 import { MeetingDetailView } from './views/MeetingDetail'
-import { RecordingView } from './views/RecordingView'
+
+type Nav = 'home' | 'chat'
 
 export default function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [nav, setNav] = useState<Nav>('home')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [recording, setRecording] = useState<Meeting | null>(null)
   const [progress, setProgress] = useState<Record<string, PipelineStage>>({})
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
   const refresh = useCallback(async () => {
     setMeetings(await window.api.listMeetings())
@@ -35,7 +40,6 @@ export default function App() {
     setError(null)
     try {
       const meeting = await window.api.startRecording()
-      setRecording(meeting)
       setSelectedId(meeting.id)
       await refresh()
     } catch (e) {
@@ -50,7 +54,6 @@ export default function App() {
     } catch (e) {
       setError(String(e))
     }
-    setRecording(null)
     await refresh()
   }
 
@@ -60,72 +63,66 @@ export default function App() {
     await refresh()
   }
 
+  const errorBanner = error && (
+    <div className="error-banner">
+      <span>{error}</span>
+      <button onClick={() => setError(null)}>Dismiss</button>
+    </div>
+  )
+
+  if (selectedId) {
+    return (
+      <>
+        {errorBanner}
+        <MeetingDetailView
+          meetingId={selectedId}
+          refreshKey={refreshKey}
+          stage={progress[selectedId]}
+          onStop={stopRecording}
+          onBack={() => setSelectedId(null)}
+          onDelete={() => deleteMeeting(selectedId)}
+          onRetry={() => window.api.retryPipeline(selectedId)}
+        />
+      </>
+    )
+  }
+
+  const trimmed = query.trim().toLowerCase()
+  const visible = trimmed
+    ? meetings.filter((m) => m.title.toLowerCase().includes(trimmed))
+    : meetings
+
   return (
     <div className="layout">
+      <div className="drag-strip" />
+      {errorBanner}
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <h1>Meetings</h1>
-          {recording ? (
-            <button className="stop" onClick={stopRecording}>
-              ■ Stop
-            </button>
-          ) : (
-            <button className="record" onClick={startRecording}>
-              ● Record
-            </button>
-          )}
-        </div>
-        <ul className="meeting-list">
-          {meetings.map((m) => (
-            <li
-              key={m.id}
-              className={m.id === selectedId ? 'selected' : ''}
-              onClick={() => setSelectedId(m.id)}
-            >
-              <span className="meeting-title">{m.title}</span>
-              <StatusBadge meeting={m} stage={progress[m.id]} />
-            </li>
-          ))}
-          {meetings.length === 0 && <li className="empty">No meetings yet</li>}
-        </ul>
+        <label className="search">
+          <SearchIcon />
+          <input placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+        <nav className="side-nav">
+          <button className={nav === 'home' ? 'active' : ''} onClick={() => setNav('home')}>
+            <HomeIcon /> Home
+          </button>
+          <button className={nav === 'chat' ? 'active' : ''} onClick={() => setNav('chat')}>
+            <ChatIcon /> Chat
+          </button>
+        </nav>
       </aside>
-
       <main className="main">
-        {error && <div className="error">{error}</div>}
-        {recording ? (
-          <RecordingView onStop={stopRecording} />
-        ) : selectedId ? (
-          <MeetingDetailView
-            meetingId={selectedId}
-            refreshKey={refreshKey}
-            stage={progress[selectedId]}
-            onDelete={() => deleteMeeting(selectedId)}
-            onRetry={() => window.api.retryPipeline(selectedId)}
-          />
+        {nav === 'chat' ? (
+          <ChatView />
         ) : (
-          <p className="empty">Select a meeting, or press Record to start a new one.</p>
+          <HomeView
+            meetings={visible}
+            progress={progress}
+            searching={trimmed.length > 0}
+            onOpen={setSelectedId}
+            onNew={startRecording}
+          />
         )}
       </main>
     </div>
   )
-}
-
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  converting: 'Preparing audio…',
-  'transcribing-mic': 'Transcribing you…',
-  'transcribing-system': 'Transcribing others…',
-  merging: 'Merging…',
-  summarizing: 'Writing notes…'
-}
-
-export function stageLabel(stage: PipelineStage | undefined): string {
-  return stage ? STAGE_LABELS[stage] : 'Processing…'
-}
-
-function StatusBadge({ meeting, stage }: { meeting: Meeting; stage?: PipelineStage }) {
-  if (meeting.status === 'recording') return <span className="badge rec">rec</span>
-  if (meeting.status === 'processing')
-    return <span className="badge processing">{stageLabel(stage)}</span>
-  if (meeting.status === 'error') return <span className="badge err">error</span>
-  return null
 }

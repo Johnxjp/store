@@ -1,110 +1,125 @@
-import CoreMedia
+import AudioToolbox
+import CoreAudio
 import Foundation
-import ScreenCaptureKit
 
-/// Captures system (loopback) audio via ScreenCaptureKit and writes 16-bit
-/// mono WAV at 48 kHz. Own-process audio is excluded so app sounds don't leak
-/// into the transcript.
-final class SystemAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
-    private var stream: SCStream?
+/// Captures system (loopback) audio via a CoreAudio process tap and writes
+/// 16-bit mono WAV. Unlike ScreenCaptureKit, taps are classified as "System
+/// Audio Recording Only" — no screen-recording indicator. Own-process audio
+/// is irrelevant here: this helper never plays sound.
+final class SystemAudioRecorder {
+    private var tapID = AudioObjectID(kAudioObjectUnknown)
+    private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+    private var ioProcID: AudioDeviceIOProcID?
     private var writer: WavWriter?
-    private let queue = DispatchQueue(label: "system-audio")
     private let anchorLock = NSLock()
     private(set) var firstBufferEpochMs: Int64?
-
-    static let sampleRate = 48000
+    private var sampleRate = 48000
+    private var channels = 1
 
     func start(url: URL) async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        guard let display = content.displays.first else {
-            throw CaptureError("no display found for system audio capture")
+        let desc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        desc.name = "ai-meeting-notes system audio"
+        desc.isPrivate = true
+        desc.muteBehavior = .unmuted
+
+        var tap = AudioObjectID(kAudioObjectUnknown)
+        var status = AudioHardwareCreateProcessTap(desc, &tap)
+        guard status == noErr else {
+            throw CaptureError(
+                "failed to create system audio tap (status \(status)) — check System Audio Recording permission")
         }
-        writer = try WavWriter(url: url, sampleRate: Self.sampleRate)
+        tapID = tap
 
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-        let config = SCStreamConfiguration()
-        config.capturesAudio = true
-        config.excludesCurrentProcessAudio = true
-        config.sampleRate = Self.sampleRate
-        config.channelCount = 2
-        config.width = 2
-        config.height = 2
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var asbd = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        status = AudioObjectGetPropertyData(tapID, &addr, 0, nil, &size, &asbd)
+        guard status == noErr, asbd.mSampleRate > 0 else {
+            throw CaptureError("cannot read system audio tap format (status \(status))")
+        }
+        sampleRate = Int(asbd.mSampleRate)
+        channels = max(1, Int(asbd.mChannelsPerFrame))
 
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        try await stream.startCapture()
-        self.stream = stream
+        writer = try WavWriter(url: url, sampleRate: sampleRate)
+
+        let aggregateDesc: [String: Any] = [
+            kAudioAggregateDeviceNameKey as String: "ai-meeting-notes-tap",
+            kAudioAggregateDeviceUIDKey as String: UUID().uuidString,
+            kAudioAggregateDeviceIsPrivateKey as String: true,
+            kAudioAggregateDeviceTapAutoStartKey as String: true,
+            kAudioAggregateDeviceTapListKey as String: [
+                [
+                    kAudioSubTapUIDKey as String: desc.uuid.uuidString,
+                    kAudioSubTapDriftCompensationKey as String: true,
+                ]
+            ],
+        ]
+        var aggregate = AudioObjectID(kAudioObjectUnknown)
+        status = AudioHardwareCreateAggregateDevice(aggregateDesc as CFDictionary, &aggregate)
+        guard status == noErr else {
+            throw CaptureError("failed to create aggregate device for tap (status \(status))")
+        }
+        aggregateID = aggregate
+
+        status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
+            [weak self] _, inInputData, _, _, _ in
+            self?.handle(inInputData)
+        }
+        guard status == noErr, ioProcID != nil else {
+            throw CaptureError("failed to create IO proc for tap (status \(status))")
+        }
+        status = AudioDeviceStart(aggregateID, ioProcID)
+        guard status == noErr else {
+            throw CaptureError("failed to start tap aggregate device (status \(status))")
+        }
     }
 
     func stop() async {
-        if let stream {
-            try? await stream.stopCapture()
+        if let ioProcID, aggregateID != AudioObjectID(kAudioObjectUnknown) {
+            AudioDeviceStop(aggregateID, ioProcID)
+            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
         }
-        stream = nil
+        ioProcID = nil
+        if aggregateID != AudioObjectID(kAudioObjectUnknown) {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = AudioObjectID(kAudioObjectUnknown)
+        }
+        if tapID != AudioObjectID(kAudioObjectUnknown) {
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = AudioObjectID(kAudioObjectUnknown)
+        }
         writer?.finalize()
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, sampleBuffer.isValid else { return }
-        let samples = Self.monoInt16(from: sampleBuffer)
-        guard !samples.isEmpty else { return }
+    /// The tap delivers float32 PCM in the format reported by
+    /// kAudioTapPropertyFormat (mono mixdown requested, but average whatever
+    /// channels arrive to stay safe).
+    private func handle(_ list: UnsafePointer<AudioBufferList>) {
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
+        guard let buf = buffers.first, let ptr = buf.mData else { return }
+        let totalFloats = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
+        guard totalFloats > 0 else { return }
+        let floats = UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: Float.self), count: totalFloats)
+
+        let ch = max(1, channels)
+        let frames = totalFloats / ch
+        guard frames > 0 else { return }
+        let samples: [Int16] = (0..<frames).map { i in
+            var sum: Float = 0
+            for c in 0..<ch { sum += floats[i * ch + c] }
+            let v = max(-1, min(1, sum / Float(ch)))
+            return Int16(v * Float(Int16.max))
+        }
 
         anchorLock.lock()
         if firstBufferEpochMs == nil {
-            let bufferDurationMs = Int64(Double(samples.count) / Double(Self.sampleRate) * 1000)
+            let bufferDurationMs = Int64(Double(frames) / Double(sampleRate) * 1000)
             firstBufferEpochMs = Int64(Date().timeIntervalSince1970 * 1000) - bufferDurationMs
         }
         anchorLock.unlock()
         writer?.append(samples)
-    }
-
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        Events.error("system audio stream stopped: \(error.localizedDescription)")
-    }
-
-    /// SCK delivers float32 audio (interleaved or not, per the format flags).
-    /// Downmix all channels to mono int16.
-    private static func monoInt16(from sampleBuffer: CMSampleBuffer) -> [Int16] {
-        guard let formatDesc = sampleBuffer.formatDescription,
-              let asbd = formatDesc.audioStreamBasicDescription else { return [] }
-        let isFloat = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
-        let isNonInterleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
-        guard isFloat else { return [] }
-
-        var out: [Int16] = []
-        try? sampleBuffer.withAudioBufferList { audioBufferList, _ in
-            let buffers = Array(audioBufferList)
-            guard !buffers.isEmpty else { return }
-
-            if isNonInterleaved {
-                // One buffer per channel.
-                let channelData: [[Float]] = buffers.map { buf in
-                    guard let ptr = buf.mData else { return [] }
-                    let count = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
-                    return Array(UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: Float.self), count: count))
-                }
-                guard let frames = channelData.first?.count, frames > 0 else { return }
-                out = (0..<frames).map { i in
-                    var sum: Float = 0
-                    for ch in channelData where i < ch.count { sum += ch[i] }
-                    let v = max(-1, min(1, sum / Float(channelData.count)))
-                    return Int16(v * Float(Int16.max))
-                }
-            } else {
-                guard let ptr = buffers[0].mData else { return }
-                let channels = max(1, Int(asbd.mChannelsPerFrame))
-                let totalFloats = Int(buffers[0].mDataByteSize) / MemoryLayout<Float>.size
-                let floats = UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: Float.self), count: totalFloats)
-                let frames = totalFloats / channels
-                out = (0..<frames).map { i in
-                    var sum: Float = 0
-                    for ch in 0..<channels { sum += floats[i * channels + ch] }
-                    let v = max(-1, min(1, sum / Float(channels)))
-                    return Int16(v * Float(Int16.max))
-                }
-            }
-        }
-        return out
     }
 }

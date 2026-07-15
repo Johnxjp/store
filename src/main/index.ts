@@ -9,9 +9,11 @@ const dirname = import.meta.dirname
 
 function createWindow(): void {
   const win = new BrowserWindow({
-    width: 900,
-    height: 700,
+    width: 1080,
+    height: 720,
     title: 'AI Meeting Notes',
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#f6f4ee',
     webPreferences: {
       preload: join(dirname, '../preload/index.mjs'),
       sandbox: false

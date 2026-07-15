@@ -6,7 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 mkdir -p resources/bin
-swiftc -O -parse-as-library -target arm64-apple-macosx14.0 \
+# macOS 14.2+ for CoreAudio process taps (CATapDescription)
+swiftc -O -parse-as-library -target arm64-apple-macosx14.2 \
   -o resources/bin/audio-capture \
   native/AudioCapture/Sources/AudioCapture/*.swift
 echo "Built helpers: $(ls resources/bin)"
