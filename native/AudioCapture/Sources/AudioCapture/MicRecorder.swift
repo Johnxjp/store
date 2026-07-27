@@ -14,6 +14,20 @@ final class MicRecorder {
 
     func start(url: URL) throws {
         let input = engine.inputNode
+        // Apple's voice-processing unit (AEC) subtracts whatever the Mac is
+        // playing from the mic signal, so speaker bleed of the far side never
+        // reaches the recording. Must be enabled before reading the format —
+        // it changes the node's I/O format.
+        do {
+            try input.setVoiceProcessingEnabled(true)
+        } catch {
+            throw CaptureError("failed to enable voice processing (AEC): \(error)")
+        }
+        // Voice processing ducks other apps' audio by default; the system
+        // recorder is capturing that same audio, so keep ducking minimal.
+        input.voiceProcessingOtherAudioDuckingConfiguration =
+            AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                enableAdvancedDucking: false, duckingLevel: .min)
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw CaptureError("microphone reports invalid format (no input device?)")

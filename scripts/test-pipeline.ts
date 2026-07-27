@@ -1,23 +1,58 @@
 // Headless driver for the transcribe+merge pipeline against a recording dir.
+// Mirrors the app pipeline: silence gate + gain boost + parallel transcription.
 // Usage: npx tsx scripts/test-pipeline.ts <recording-dir> [micEpochMs] [systemEpochMs]
+// Epoch anchors default to the dir's session.json when present.
+import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { formatTranscript, mergeTranscripts } from '../src/main/merge'
-import { convertTo16k, transcribeWav } from '../src/main/transcribe'
+import { formatTranscript, mergeTranscripts, type WhisperSegment } from '../src/main/merge'
+import {
+  boostGainDb,
+  convertTo16k,
+  isSilent,
+  measureMaxVolumeDb,
+  transcribeWav
+} from '../src/main/transcribe'
 
 const dir = resolve(process.argv[2] ?? 'data/recordings/pipeline-test')
-const micEpochMs = Number(process.argv[3] ?? 0)
-const systemEpochMs = Number(process.argv[4] ?? 5000)
+const sessionPath = join(dir, 'session.json')
+const session = existsSync(sessionPath)
+  ? (JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
+      micEpochMs: number
+      systemEpochMs: number
+    })
+  : null
+const micEpochMs = Number(process.argv[3] ?? session?.micEpochMs ?? 0)
+const systemEpochMs = Number(process.argv[4] ?? session?.systemEpochMs ?? 5000)
 const modelPath = resolve('data/models/ggml-large-v3-turbo.bin')
 
-const mic16k = join(dir, 'mic-16k.wav')
-const system16k = join(dir, 'system-16k.wav')
-await convertTo16k(join(dir, 'mic.wav'), mic16k)
-await convertTo16k(join(dir, 'system.wav'), system16k)
+async function prepare(name: 'mic' | 'system'): Promise<string | null> {
+  const wav16k = join(dir, `${name}-16k.wav`)
+  await convertTo16k(join(dir, `${name}.wav`), wav16k)
+  const maxDb = await measureMaxVolumeDb(wav16k)
+  if (isSilent(maxDb)) {
+    console.error(`${name}: peak ${maxDb.toFixed(1)} dB — silent, skipping`)
+    return null
+  }
+  const gain = boostGainDb(maxDb)
+  if (gain > 0) {
+    console.error(`${name}: peak ${maxDb.toFixed(1)} dB — boosting +${gain.toFixed(1)} dB`)
+    await convertTo16k(join(dir, `${name}.wav`), wav16k, gain)
+  } else {
+    console.error(`${name}: peak ${maxDb.toFixed(1)} dB`)
+  }
+  return wav16k
+}
 
-console.error('transcribing mic...')
-const micSegments = await transcribeWav(mic16k, modelPath)
-console.error('transcribing system...')
-const systemSegments = await transcribeWav(system16k, modelPath)
+const [mic16k, system16k] = await Promise.all([prepare('mic'), prepare('system')])
+
+console.error('transcribing...')
+const started = Date.now()
+const empty: WhisperSegment[] = []
+const [micSegments, systemSegments] = await Promise.all([
+  mic16k ? transcribeWav(mic16k, modelPath) : empty,
+  system16k ? transcribeWav(system16k, modelPath) : empty
+])
+console.error(`transcribed in ${((Date.now() - started) / 1000).toFixed(1)}s`)
 
 const segments = mergeTranscripts(
   { segments: micSegments, epochMs: micEpochMs },

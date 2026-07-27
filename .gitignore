@@ -2,6 +2,7 @@ node_modules/
 out/
 dist/
 data/
+experiments/results/streaming/*-work/
 resources/bin/
 native/*/.build/
 *.log

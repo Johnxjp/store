@@ -1,0 +1,33 @@
+{
+  "granolaAsReference": {
+    "refWords": 5345,
+    "hypWords": 17838,
+    "editDistance": 12690,
+    "wer": 2.374181478016838
+  },
+  "appAsReference": {
+    "refWords": 17838,
+    "hypWords": 5345,
+    "editDistance": 12690,
+    "wer": 0.7114026236125126
+  },
+  "perStreamVsGranola": {
+    "meOnly": {
+      "refWords": 5345,
+      "hypWords": 12266,
+      "editDistance": 7479,
+      "wer": 1.3992516370439663
+    },
+    "themOnly": {
+      "refWords": 5345,
+      "hypWords": 5572,
+      "editDistance": 754,
+      "wer": 0.141066417212348
+    }
+  },
+  "segmentCounts": {
+    "total": 755,
+    "me": 380,
+    "them": 375
+  }
+}

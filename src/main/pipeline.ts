@@ -6,7 +6,13 @@ import * as db from './db'
 import { buildSummaryPrompt, generateNotes } from './enhance'
 import { mergeTranscripts, type WhisperSegment } from './merge'
 import { modelPath } from './paths'
-import { convertTo16k, isSilent, measureMeanVolumeDb, transcribeWav } from './transcribe'
+import {
+  boostGainDb,
+  convertTo16k,
+  isSilent,
+  measureMaxVolumeDb,
+  transcribeWav
+} from './transcribe'
 
 export interface SessionAnchors {
   micEpochMs: number
@@ -20,6 +26,20 @@ export async function writeSessionFile(dir: string, anchors: SessionAnchors): Pr
 
 export async function readSessionFile(dir: string): Promise<SessionAnchors> {
   return JSON.parse(await readFile(join(dir, 'session.json'), 'utf-8')) as SessionAnchors
+}
+
+/**
+ * Convert to 16 kHz mono and decide whether the stream is worth transcribing.
+ * Silent streams are skipped (Whisper hallucinates on silence); quiet ones are
+ * re-converted with a gain boost so Whisper sees healthy levels.
+ */
+async function prepare16k(srcWav: string, wav16k: string): Promise<boolean> {
+  await convertTo16k(srcWav, wav16k)
+  const maxDb = await measureMaxVolumeDb(wav16k)
+  if (isSilent(maxDb)) return false
+  const gain = boostGainDb(maxDb)
+  if (gain > 0) await convertTo16k(srcWav, wav16k, gain)
+  return true
 }
 
 /**
@@ -37,30 +57,32 @@ export async function runPipeline(
   const dir = meeting.audioDir
 
   db.setMeetingStatus(meetingId, 'processing')
+  const timed = async <T>(stage: PipelineStage, fn: () => Promise<T>): Promise<T> => {
+    onProgress(stage)
+    const started = Date.now()
+    const result = await fn()
+    console.log(`[pipeline] ${stage} ${((Date.now() - started) / 1000).toFixed(1)}s`)
+    return result
+  }
   try {
     const anchors = await readSessionFile(dir)
 
-    onProgress('converting')
     const mic16k = join(dir, 'mic-16k.wav')
     const system16k = join(dir, 'system-16k.wav')
-    await convertTo16k(join(dir, 'mic.wav'), mic16k)
-    await convertTo16k(join(dir, 'system.wav'), system16k)
+    const [micAudible, systemAudible] = await timed('converting', () =>
+      Promise.all([
+        prepare16k(join(dir, 'mic.wav'), mic16k),
+        prepare16k(join(dir, 'system.wav'), system16k)
+      ])
+    )
 
-    // Silence gate: Whisper invents text for silent audio, so silent streams
-    // are never transcribed at all.
-    const micDb = await measureMeanVolumeDb(mic16k)
-    const systemDb = await measureMeanVolumeDb(system16k)
-
-    let micSegments: WhisperSegment[] = []
-    if (!isSilent(micDb)) {
-      onProgress('transcribing-mic')
-      micSegments = await transcribeWav(mic16k, modelPath)
-    }
-    let systemSegments: WhisperSegment[] = []
-    if (!isSilent(systemDb)) {
-      onProgress('transcribing-system')
-      systemSegments = await transcribeWav(system16k, modelPath)
-    }
+    const emptyStream = Promise.resolve<WhisperSegment[]>([])
+    const [micSegments, systemSegments] = await timed('transcribing', () =>
+      Promise.all([
+        micAudible ? transcribeWav(mic16k, modelPath) : emptyStream,
+        systemAudible ? transcribeWav(system16k, modelPath) : emptyStream
+      ])
+    )
 
     onProgress('merging')
     const segments = mergeTranscripts(
@@ -76,14 +98,15 @@ export async function runPipeline(
       return
     }
 
-    onProgress('summarizing')
-    const notes = await generateNotes(
-      buildSummaryPrompt({
-        title: meeting.title,
-        dateLabel: new Date(meeting.createdAt).toLocaleString(),
-        transcript: segments
-      }),
-      readConfig().ollamaModel
+    const notes = await timed('summarizing', () =>
+      generateNotes(
+        buildSummaryPrompt({
+          title: meeting.title,
+          dateLabel: new Date(meeting.createdAt).toLocaleString(),
+          transcript: segments
+        }),
+        readConfig().ollamaModel
+      )
     )
     db.setEnhancedNotes(meetingId, notes)
     db.setMeetingStatus(meetingId, 'ready')

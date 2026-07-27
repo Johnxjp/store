@@ -9,8 +9,7 @@ export function formatElapsed(ms: number): string {
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
   converting: 'Preparing audio…',
-  'transcribing-mic': 'Transcribing you…',
-  'transcribing-system': 'Transcribing others…',
+  transcribing: 'Transcribing…',
   merging: 'Merging…',
   summarizing: 'Writing notes…'
 }

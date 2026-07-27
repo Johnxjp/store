@@ -22,8 +22,7 @@ export interface Meeting {
   audioDir: string | null
 }
 
-export type PipelineStage =
-  'converting' | 'transcribing-mic' | 'transcribing-system' | 'merging' | 'summarizing'
+export type PipelineStage = 'converting' | 'transcribing' | 'merging' | 'summarizing'
 
 export interface PipelineProgress {
   meetingId: string

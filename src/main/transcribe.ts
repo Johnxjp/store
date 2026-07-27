@@ -14,23 +14,39 @@ export function resolveBin(name: string): string {
 }
 
 /**
- * Streams quieter than this are treated as silent and skipped entirely —
+ * Streams that never peak above this are treated as silent and skipped entirely —
  * Whisper hallucinates plausible text on silence, so it must never see it.
- * Speech sits around -35..-15 dB mean; ambient room noise below -55 dB.
+ * Gate on peak, not mean: a mic that's live only while its owner talks averages
+ * below any sane mean threshold over a long meeting even though it holds real
+ * speech. Real speech peaks above -30 dB even on a quiet mic; dead streams sit
+ * near -91 dB.
  */
-export const SILENCE_MEAN_DB = -50
+export const SILENCE_MAX_DB = -40
 
-export function isSilent(meanVolumeDb: number): boolean {
-  return meanVolumeDb < SILENCE_MEAN_DB
+export function isSilent(maxVolumeDb: number): boolean {
+  return maxVolumeDb < SILENCE_MAX_DB
+}
+
+/**
+ * Quiet-but-audible streams (e.g. a low-gain mic ~25 dB under the system
+ * stream) are boosted so their peak lands at TARGET_PEAK_DB before Whisper
+ * sees them. Boosts under MIN_BOOST_DB aren't worth a re-encode.
+ */
+export const TARGET_PEAK_DB = -3
+const MIN_BOOST_DB = 3
+
+export function boostGainDb(maxVolumeDb: number): number {
+  const gain = TARGET_PEAK_DB - maxVolumeDb
+  return gain >= MIN_BOOST_DB ? gain : 0
 }
 
 /** ffmpeg's volumedetect reports on stderr; missing report = no audio = silent. */
-export function parseMeanVolumeDb(ffmpegStderr: string): number {
-  const match = ffmpegStderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/)
+export function parseMaxVolumeDb(ffmpegStderr: string): number {
+  const match = ffmpegStderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/)
   return match ? Number(match[1]) : -Infinity
 }
 
-export async function measureMeanVolumeDb(wavPath: string): Promise<number> {
+export async function measureMaxVolumeDb(wavPath: string): Promise<number> {
   const { stderr } = await execFileAsync(resolveBin('ffmpeg'), [
     '-i',
     wavPath,
@@ -40,20 +56,14 @@ export async function measureMeanVolumeDb(wavPath: string): Promise<number> {
     'null',
     '-'
   ])
-  return parseMeanVolumeDb(stderr)
+  return parseMaxVolumeDb(stderr)
 }
 
-export async function convertTo16k(srcWav: string, destWav: string): Promise<void> {
-  await execFileAsync(resolveBin('ffmpeg'), [
-    '-y',
-    '-i',
-    srcWav,
-    '-ar',
-    '16000',
-    '-ac',
-    '1',
-    destWav
-  ])
+export async function convertTo16k(srcWav: string, destWav: string, gainDb = 0): Promise<void> {
+  const args = ['-y', '-i', srcWav, '-ar', '16000', '-ac', '1']
+  if (gainDb > 0) args.push('-af', `volume=${gainDb}dB`)
+  args.push(destWav)
+  await execFileAsync(resolveBin('ffmpeg'), args)
 }
 
 export async function transcribeWav(

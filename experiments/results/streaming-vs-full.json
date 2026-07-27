@@ -1,0 +1,28 @@
+[
+  {
+    "stream": "mic",
+    "audioSeconds": 4984.5,
+    "transcribeSeconds": 220.201,
+    "chunks": 183,
+    "silentChunksSkipped": 5,
+    "werVsFull": {
+      "refWords": 12290,
+      "hypWords": 12032,
+      "editDistance": 1121,
+      "wer": 0.09121236777868186
+    }
+  },
+  {
+    "stream": "system",
+    "audioSeconds": 4986.9333125,
+    "transcribeSeconds": 206,
+    "chunks": 182,
+    "silentChunksSkipped": 14,
+    "werVsFull": {
+      "refWords": 6459,
+      "hypWords": 5877,
+      "editDistance": 1595,
+      "wer": 0.2469422511224648
+    }
+  }
+]
