@@ -36,6 +36,12 @@ describe('meetings', () => {
     expect(db.getMeeting('m1')).toMatchObject({ status: 'ready', errorMessage: null })
   })
 
+  it('renames a meeting', () => {
+    create()
+    db.setMeetingTitle('m1', 'Quarterly planning')
+    expect(db.getMeeting('m1')).toMatchObject({ title: 'Quarterly planning' })
+  })
+
   it('stores enhanced notes and recording end', () => {
     create()
     db.setRecordingEnded('m1', 5000)

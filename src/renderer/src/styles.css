@@ -316,6 +316,22 @@ input {
   font-size: 34px;
   letter-spacing: -0.01em;
   margin-bottom: 16px;
+  cursor: text;
+}
+
+.note-title-input {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 34px;
+  letter-spacing: -0.01em;
+  margin-bottom: 16px;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--ink);
 }
 
 .chips {

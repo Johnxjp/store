@@ -57,6 +57,11 @@ export default function App() {
     await refresh()
   }
 
+  async function renameMeeting(id: string, title: string) {
+    await window.api.renameMeeting(id, title)
+    await refresh()
+  }
+
   async function deleteMeeting(id: string) {
     await window.api.deleteMeeting(id)
     if (selectedId === id) setSelectedId(null)
@@ -82,6 +87,7 @@ export default function App() {
           onBack={() => setSelectedId(null)}
           onDelete={() => deleteMeeting(selectedId)}
           onRetry={() => window.api.retryPipeline(selectedId)}
+          onRename={(title) => renameMeeting(selectedId, title)}
         />
       </>
     )

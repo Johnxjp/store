@@ -17,6 +17,8 @@ const api = {
   getMeeting: (id: string): Promise<MeetingDetail | null> =>
     ipcRenderer.invoke(IPC.meetingsGet, id),
   deleteMeeting: (id: string): Promise<void> => ipcRenderer.invoke(IPC.meetingsDelete, id),
+  renameMeeting: (id: string, title: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.meetingsRename, id, title),
   onPipelineProgress: (cb: (p: PipelineProgress) => void): (() => void) =>
     on(IPC.pipelineProgress, cb),
   onMeetingUpdated: (cb: (meetingId: string) => void): (() => void) => on(IPC.meetingUpdated, cb)

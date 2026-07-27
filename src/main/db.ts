@@ -108,6 +108,10 @@ export function setRecordingEnded(id: string, endedAt: number): void {
   db.prepare('UPDATE meetings SET recording_ended_at = ? WHERE id = ?').run(endedAt, id)
 }
 
+export function setMeetingTitle(id: string, title: string): void {
+  db.prepare('UPDATE meetings SET title = ? WHERE id = ?').run(title, id)
+}
+
 export function setEnhancedNotes(id: string, notes: string): void {
   db.prepare('UPDATE meetings SET enhanced_notes = ? WHERE id = ?').run(notes, id)
 }

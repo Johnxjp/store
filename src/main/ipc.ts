@@ -68,6 +68,12 @@ export function registerIpcHandlers(): void {
     return { meeting, transcript: db.getTranscript(id) }
   })
 
+  ipcMain.handle(IPC.meetingsRename, (_event, id: string, title: string): void => {
+    const trimmed = title.trim()
+    if (!trimmed) throw new Error('title cannot be empty')
+    db.setMeetingTitle(id, trimmed)
+  })
+
   ipcMain.handle(IPC.meetingsDelete, async (_event, id: string): Promise<void> => {
     const meeting = db.getMeeting(id)
     if (!meeting) return

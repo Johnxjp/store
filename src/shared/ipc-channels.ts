@@ -6,5 +6,6 @@ export const IPC = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
   meetingsDelete: 'meetings:delete',
+  meetingsRename: 'meetings:rename',
   meetingUpdated: 'meeting:updated'
 } as const

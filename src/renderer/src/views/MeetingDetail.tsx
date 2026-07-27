@@ -15,6 +15,7 @@ interface Props {
   onBack: () => void
   onDelete: () => void
   onRetry: () => void
+  onRename: (title: string) => void
 }
 
 export function MeetingDetailView({
@@ -24,10 +25,12 @@ export function MeetingDetailView({
   onStop,
   onBack,
   onDelete,
-  onRetry
+  onRetry,
+  onRename
 }: Props) {
   const [detail, setDetail] = useState<MeetingDetail | null>(null)
   const [tab, setTab] = useState<Tab>('notes')
+  const [draftTitle, setDraftTitle] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -43,6 +46,16 @@ export function MeetingDetailView({
   const { meeting, transcript } = detail
   const isRecording = meeting.status === 'recording'
   const duration = durationLabel(meeting)
+
+  function commitTitle() {
+    if (draftTitle === null) return
+    const trimmed = draftTitle.trim()
+    setDraftTitle(null)
+    if (trimmed && trimmed !== meeting.title) {
+      setDetail({ ...detail!, meeting: { ...meeting, title: trimmed } })
+      onRename(trimmed)
+    }
+  }
 
   return (
     <div className="note-view">
@@ -60,7 +73,27 @@ export function MeetingDetailView({
 
       <div className="note-scroll">
         <article className="note">
-          <h1 className="note-title">{meeting.title}</h1>
+          {draftTitle === null ? (
+            <h1
+              className="note-title"
+              title="Click to rename"
+              onClick={() => setDraftTitle(meeting.title)}
+            >
+              {meeting.title}
+            </h1>
+          ) : (
+            <input
+              className="note-title-input"
+              value={draftTitle}
+              autoFocus
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitTitle()
+                if (e.key === 'Escape') setDraftTitle(null)
+              }}
+            />
+          )}
           <div className="chips">
             <span className="chip">
               <CalendarIcon />
