@@ -57,6 +57,13 @@ export default function App() {
     await refresh()
   }
 
+  async function retryPipeline(id: string) {
+    // The handler kicks off the pipeline and returns once the meeting is
+    // 'processing'; refreshing here swaps the error card for the status line.
+    await window.api.retryPipeline(id)
+    await refresh()
+  }
+
   async function renameMeeting(id: string, title: string) {
     await window.api.renameMeeting(id, title)
     await refresh()
@@ -86,7 +93,7 @@ export default function App() {
           onStop={stopRecording}
           onBack={() => setSelectedId(null)}
           onDelete={() => deleteMeeting(selectedId)}
-          onRetry={() => window.api.retryPipeline(selectedId)}
+          onRetry={() => void retryPipeline(selectedId)}
           onRename={(title) => renameMeeting(selectedId, title)}
         />
       </>

@@ -63,11 +63,11 @@ describe('meetings', () => {
     expect(db.getMeeting('rec')).toMatchObject({
       status: 'error',
       errorMessage:
-        'Recording was interrupted by an app restart. Retry to process the audio captured so far.'
+        'Recording was interrupted by an app restart. The audio captured so far is safe on disk.'
     })
     expect(db.getMeeting('proc')).toMatchObject({
       status: 'error',
-      errorMessage: 'Processing was interrupted by an app restart. Retry to run it again.'
+      errorMessage: 'Processing was interrupted by an app restart.'
     })
     expect(db.getMeeting('done')).toMatchObject({ status: 'ready', errorMessage: null })
     expect(db.markInterruptedMeetings()).toBe(0)

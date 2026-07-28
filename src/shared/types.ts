@@ -32,4 +32,6 @@ export interface PipelineProgress {
 export interface MeetingDetail {
   meeting: Meeting
   transcript: TranscriptSegment[]
+  /** True when the recorded WAVs (and session.json) still exist on disk, so the pipeline can re-run. */
+  hasAudio: boolean
 }

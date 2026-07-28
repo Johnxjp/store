@@ -106,8 +106,8 @@ export function markInterruptedMeetings(): number {
       `UPDATE meetings
        SET status = 'error',
            error_message = CASE status
-             WHEN 'recording' THEN 'Recording was interrupted by an app restart. Retry to process the audio captured so far.'
-             ELSE 'Processing was interrupted by an app restart. Retry to run it again.'
+             WHEN 'recording' THEN 'Recording was interrupted by an app restart. The audio captured so far is safe on disk.'
+             ELSE 'Processing was interrupted by an app restart.'
            END
        WHERE status IN ('recording', 'processing')`
     )

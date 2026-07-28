@@ -43,7 +43,7 @@ export function MeetingDetailView({
   }, [meetingId, refreshKey])
 
   if (!detail) return <div className="note-view" />
-  const { meeting, transcript } = detail
+  const { meeting, transcript, hasAudio } = detail
   const isRecording = meeting.status === 'recording'
   const duration = durationLabel(meeting)
 
@@ -111,10 +111,16 @@ export function MeetingDetailView({
 
           {meeting.status === 'error' && (
             <div className="error-card">
-              <p>{meeting.errorMessage ?? 'Something went wrong.'}</p>
-              <button className="ghost-btn" onClick={onRetry}>
-                Retry
-              </button>
+              {transcript.length > 0 || hasAudio ? (
+                <>
+                  <p>{meeting.errorMessage ?? 'Something went wrong.'}</p>
+                  <button className="ghost-btn" onClick={onRetry}>
+                    {transcript.length > 0 ? 'Generate summary' : 'Generate transcript and summary'}
+                  </button>
+                </>
+              ) : (
+                <p>Failed to capture audio for this meeting, so there is nothing to process.</p>
+              )}
             </div>
           )}
 

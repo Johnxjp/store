@@ -53,8 +53,7 @@ export async function runPipeline(
   onProgress: (stage: PipelineStage) => void
 ): Promise<void> {
   const meeting = db.getMeeting(meetingId)
-  if (!meeting?.audioDir) throw new Error(`meeting ${meetingId} has no recording`)
-  const dir = meeting.audioDir
+  if (!meeting) throw new Error(`meeting ${meetingId} not found`)
 
   db.setMeetingStatus(meetingId, 'processing')
   const timed = async <T>(stage: PipelineStage, fn: () => Promise<T>): Promise<T> => {
@@ -65,37 +64,45 @@ export async function runPipeline(
     return result
   }
   try {
-    const anchors = await readSessionFile(dir)
-
-    const mic16k = join(dir, 'mic-16k.wav')
-    const system16k = join(dir, 'system-16k.wav')
-    const [micAudible, systemAudible] = await timed('converting', () =>
-      Promise.all([
-        prepare16k(join(dir, 'mic.wav'), mic16k),
-        prepare16k(join(dir, 'system.wav'), system16k)
-      ])
-    )
-
-    const emptyStream = Promise.resolve<WhisperSegment[]>([])
-    const [micSegments, systemSegments] = await timed('transcribing', () =>
-      Promise.all([
-        micAudible ? transcribeWav(mic16k, modelPath) : emptyStream,
-        systemAudible ? transcribeWav(system16k, modelPath) : emptyStream
-      ])
-    )
-
-    onProgress('merging')
-    const segments = mergeTranscripts(
-      { segments: micSegments, epochMs: anchors.micEpochMs },
-      { segments: systemSegments, epochMs: anchors.systemEpochMs }
-    )
-    db.saveTranscript(meetingId, segments)
-
-    // Second gate: nothing survived transcription+filtering → nothing to summarize.
+    // A stored transcript is always complete (it's only written after merge),
+    // so a retry with one on disk resumes at summarization instead of
+    // re-transcribing the whole recording.
+    let segments = db.getTranscript(meetingId)
     if (segments.length === 0) {
-      db.setEnhancedNotes(meetingId, '_No speech was detected in this recording._')
-      db.setMeetingStatus(meetingId, 'ready')
-      return
+      const dir = meeting.audioDir
+      if (!dir) throw new Error(`meeting ${meetingId} has no recording`)
+      const anchors = await readSessionFile(dir)
+
+      const mic16k = join(dir, 'mic-16k.wav')
+      const system16k = join(dir, 'system-16k.wav')
+      const [micAudible, systemAudible] = await timed('converting', () =>
+        Promise.all([
+          prepare16k(join(dir, 'mic.wav'), mic16k),
+          prepare16k(join(dir, 'system.wav'), system16k)
+        ])
+      )
+
+      const emptyStream = Promise.resolve<WhisperSegment[]>([])
+      const [micSegments, systemSegments] = await timed('transcribing', () =>
+        Promise.all([
+          micAudible ? transcribeWav(mic16k, modelPath) : emptyStream,
+          systemAudible ? transcribeWav(system16k, modelPath) : emptyStream
+        ])
+      )
+
+      onProgress('merging')
+      segments = mergeTranscripts(
+        { segments: micSegments, epochMs: anchors.micEpochMs },
+        { segments: systemSegments, epochMs: anchors.systemEpochMs }
+      )
+      db.saveTranscript(meetingId, segments)
+
+      // Second gate: nothing survived transcription+filtering → nothing to summarize.
+      if (segments.length === 0) {
+        db.setEnhancedNotes(meetingId, '_No speech was detected in this recording._')
+        db.setMeetingStatus(meetingId, 'ready')
+        return
+      }
     }
 
     const notes = await timed('summarizing', () =>

@@ -1,5 +1,6 @@
 import { ipcMain, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IPC } from '../shared/ipc-channels'
@@ -34,7 +35,7 @@ export function abortActiveRecording(): Promise<void> | null {
       db.setMeetingStatus(
         meetingId,
         'error',
-        'Recording stopped because the app quit. Retry to process the captured audio.'
+        'Recording stopped because the app quit. The captured audio is safe on disk.'
       )
     })
 }
@@ -88,7 +89,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.meetingsGet, (_event, id: string): MeetingDetail | null => {
     const meeting = db.getMeeting(id)
     if (!meeting) return null
-    return { meeting, transcript: db.getTranscript(id) }
+    const hasAudio =
+      meeting.audioDir !== null &&
+      ['mic.wav', 'system.wav', 'session.json'].every((f) => existsSync(join(meeting.audioDir!, f)))
+    return { meeting, transcript: db.getTranscript(id), hasAudio }
   })
 
   ipcMain.handle(IPC.meetingsRename, (_event, id: string, title: string): void => {
