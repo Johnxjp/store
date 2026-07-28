@@ -45,6 +45,7 @@ Two WAVs → ffmpeg to 16 kHz mono → whisper-cli (JSON out, per stream) → me
 - **Ollama model is config, not code.** `data/config.json` → `ollamaModel`, re-read on every summarize so you can edit + hit Retry without restarting.
 - **Whisper large-v3-turbo via `whisper-cli`** (Homebrew) as a child process — no bindings, easy to swap. Model file in `data/models/` (1.6 GB, never committed).
 - **WAVs are kept forever** (≈330 MB/hour). They're the retry safety net: any pipeline failure is re-runnable from disk (`session.json` beside the WAVs holds the epoch anchors).
+- **Stale-session recovery over persisted recording state.** The active recording session lives only in main-process memory (`session` in `ipc.ts`), so any crash/restart — including dev watch-mode hot-restarts — orphans DB rows stuck in `recording`/`processing`, which the UI renders as a fake live recording that can't be stopped or deleted. Two layers handle it: a `before-quit` hook stops the helper (WAVs finalize) and marks the meeting `error` (the pipeline is too slow to run during quit), and `markInterruptedMeetings()` at startup sweeps any leftover `recording`/`processing` rows to `error` → Retry. Stale meetings are marked, never auto-deleted — their WAVs may hold real audio. _Might revisit:_ auto-running the pipeline at next launch instead of requiring a manual Retry, or persisting session state so an in-flight recording could survive a main-process restart.
 
 ## Lessons learned (read before touching related code)
 

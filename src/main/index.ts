@@ -1,8 +1,8 @@
 import { app, BrowserWindow } from 'electron'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { initDb } from './db'
-import { registerIpcHandlers } from './ipc'
+import { initDb, markInterruptedMeetings } from './db'
+import { abortActiveRecording, registerIpcHandlers } from './ipc'
 import { dataDir } from './paths'
 
 const dirname = import.meta.dirname
@@ -30,6 +30,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   mkdirSync(dataDir, { recursive: true })
   initDb(join(dataDir, 'db.sqlite'))
+  markInterruptedMeetings()
   registerIpcHandlers()
   createWindow()
 
@@ -40,4 +41,17 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   app.quit()
+})
+
+// Quit is deferred once so the audio helper can finalize the WAVs; a crash or
+// force-kill skips this path and is handled by markInterruptedMeetings().
+let stoppingBeforeQuit = false
+app.on('before-quit', (event) => {
+  if (stoppingBeforeQuit) return
+  const pending = abortActiveRecording()
+  if (pending) {
+    event.preventDefault()
+    stoppingBeforeQuit = true
+    void pending.finally(() => app.quit())
+  }
 })

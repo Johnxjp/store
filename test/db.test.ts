@@ -52,6 +52,27 @@ describe('meetings', () => {
     })
   })
 
+  it('marks stale recording and processing meetings as error, leaving others alone', () => {
+    create('rec')
+    create('proc')
+    db.setMeetingStatus('proc', 'processing')
+    create('done')
+    db.setMeetingStatus('done', 'ready')
+
+    expect(db.markInterruptedMeetings()).toBe(2)
+    expect(db.getMeeting('rec')).toMatchObject({
+      status: 'error',
+      errorMessage:
+        'Recording was interrupted by an app restart. Retry to process the audio captured so far.'
+    })
+    expect(db.getMeeting('proc')).toMatchObject({
+      status: 'error',
+      errorMessage: 'Processing was interrupted by an app restart. Retry to run it again.'
+    })
+    expect(db.getMeeting('done')).toMatchObject({ status: 'ready', errorMessage: null })
+    expect(db.markInterruptedMeetings()).toBe(0)
+  })
+
   it('deletes a meeting and cascades its transcript', () => {
     create()
     db.saveTranscript('m1', [{ speaker: 'me', startMs: 0, endMs: 100, text: 'hi' }])

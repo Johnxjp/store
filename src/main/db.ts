@@ -96,6 +96,25 @@ export function listMeetings(): Meeting[] {
   return rows.map(toMeeting)
 }
 
+// Recording/processing state lives only in main-process memory, so any row
+// still in those states at startup is an orphan from a crashed or restarted
+// run. Marking it 'error' surfaces the Retry button, which re-runs the
+// pipeline from the WAVs on disk.
+export function markInterruptedMeetings(): number {
+  const result = db
+    .prepare(
+      `UPDATE meetings
+       SET status = 'error',
+           error_message = CASE status
+             WHEN 'recording' THEN 'Recording was interrupted by an app restart. Retry to process the audio captured so far.'
+             ELSE 'Processing was interrupted by an app restart. Retry to run it again.'
+           END
+       WHERE status IN ('recording', 'processing')`
+    )
+    .run()
+  return Number(result.changes)
+}
+
 export function setMeetingStatus(id: string, status: MeetingStatus, errorMessage?: string): void {
   db.prepare('UPDATE meetings SET status = ?, error_message = ? WHERE id = ?').run(
     status,

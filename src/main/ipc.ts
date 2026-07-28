@@ -16,6 +16,29 @@ interface Session {
 
 let session: Session | null = null
 
+/**
+ * Stops an in-flight recording on app quit so the WAVs finalize and the
+ * meeting doesn't stay stuck in 'recording'. The pipeline is too slow to run
+ * during quit, so the meeting is marked 'error' and Retry picks it up later.
+ * Returns null when nothing is recording.
+ */
+export function abortActiveRecording(): Promise<void> | null {
+  if (!session) return null
+  const { recorder, meetingId } = session
+  session = null
+  return recorder
+    .stop()
+    .catch(() => {})
+    .then(() => {
+      db.setRecordingEnded(meetingId, Date.now())
+      db.setMeetingStatus(
+        meetingId,
+        'error',
+        'Recording stopped because the app quit. Retry to process the captured audio.'
+      )
+    })
+}
+
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.recordingStart, async (): Promise<Meeting> => {
     if (session) throw new Error('already recording')
