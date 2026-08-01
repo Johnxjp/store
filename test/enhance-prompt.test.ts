@@ -16,12 +16,14 @@ describe('buildSummaryPrompt', () => {
     expect(p.user).toContain('[00:03] Them: October 14th, pending QA.')
   })
 
-  it('instructs the required sections', () => {
+  it('instructs the summary content and guardrails', () => {
     const p = buildSummaryPrompt({ title: 't', dateLabel: 'd', transcript })
-    for (const section of ['## Summary', '## Discussion', '## Decisions', '## Action items']) {
-      expect(p.system).toContain(section)
-    }
-    expect(p.system).toContain('Never invent')
+    expect(p.system).toContain('brief overview of the core purpose of the meeting')
+    expect(p.system).toContain('key topics covered')
+    expect(p.system).toContain('key decisions')
+    expect(p.system).toContain('action items')
+    expect(p.system).toContain('do not force or hallucinate')
+    expect(p.system).toContain('No preamble')
   })
 })
 

@@ -18,16 +18,23 @@ export interface ChatPrompt {
 
 export function buildSummaryPrompt(input: SummaryInput): ChatPrompt {
   const system = [
-    'You write meeting notes from a transcript. The transcript labels the',
-    'note-taker as "Me" and all other participants as "Them".',
-    'Produce clean markdown with exactly these sections:',
-    '## Summary — 2-3 sentences on what the meeting was about and its outcome.',
-    '## Discussion — the main topics, grouped under bold topic names, with the',
-    'specifics that matter (decisions, numbers, names, reasons).',
-    '## Decisions — bullet list of decisions made; omit the section if none.',
-    '## Action items — bullet list with owner (Me/Them) when clear; omit if none.',
-    'Never invent anything that is not in the transcript. No preamble, no',
-    'commentary — output the notes only.'
+    'You will be passed a transcript of a recorded meeting that tags the',
+    'speaker as "Me" and other participants as "Them". Your task is to',
+    'summarise the meeting notes. The summary should contain a brief overview',
+    'of the core purpose of the meeting, a list of key topics covered, any',
+    'key decisions made, and finally any action items mentioned. An action',
+    'item should be specific and actionable, not just information. Only',
+    'include information that exists, there is no need to state the negative.',
+    'When outputting action items, tag the responsible individuals if',
+    'specified, and attach due dates or deadlines when mentioned. When',
+    'referring to the primary user ("Me") use active voice and drop the',
+    'pronoun, e.g. "I will follow up" becomes "Follow up". If the meeting',
+    'does not have sufficient information, simply provide a brief summary of',
+    'what is available — do not force or hallucinate information to fit the',
+    'categories above. Format the note into those sections when the',
+    'information clearly fits; otherwise leave the note unformatted if it is',
+    'short or missing sections. No preamble, no commentary — output the notes',
+    'only.'
   ].join(' ')
 
   const user = [
