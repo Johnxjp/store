@@ -1,0 +1,32 @@
+{
+  "granolaVsWhisperThem": {
+    "refWords": 5345,
+    "hypWords": 5572,
+    "editDistance": 754,
+    "wer": 0.141066417212348
+  },
+  "granolaVsParakeetThem": {
+    "refWords": 5345,
+    "hypWords": 5298,
+    "editDistance": 962,
+    "wer": 0.17998129092609916
+  },
+  "granolaVsParakeetMlxThem": {
+    "refWords": 5345,
+    "hypWords": 5542,
+    "editDistance": 785,
+    "wer": 0.146866230121609
+  },
+  "whisperThemVsParakeetThem": {
+    "refWords": 5572,
+    "hypWords": 5298,
+    "editDistance": 973,
+    "wer": 0.17462311557788945
+  },
+  "parakeetHfVsMlx": {
+    "refWords": 5298,
+    "hypWords": 5542,
+    "editDistance": 563,
+    "wer": 0.10626651566628917
+  }
+}

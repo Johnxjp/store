@@ -1,0 +1,17 @@
+[project]
+name = "parakeet"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "librosa>=0.11.0",
+    "numba>=0.66.0",
+    "parakeet-mlx>=0.5.2",
+    "soundfile>=0.14.0",
+    "torch>=2.13.0",
+    "transformers>=5.14.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1",
+]
