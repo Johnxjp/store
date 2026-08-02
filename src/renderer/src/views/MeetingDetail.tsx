@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import type { MeetingDetail, PipelineStage } from '../../../shared/types'
 import { CalendarIcon, ChevronLeftIcon, HomeIcon } from '../components/icons'
 import { RecordBar } from '../components/RecordBar'
 import { dayLabel, durationLabel, formatElapsed, stageLabel } from '../lib/format'
 
-type Tab = 'notes' | 'transcript'
+type View = 'note' | 'transcript'
 
 interface Props {
   meetingId: string
@@ -29,18 +29,33 @@ export function MeetingDetailView({
   onRename
 }: Props) {
   const [detail, setDetail] = useState<MeetingDetail | null>(null)
-  const [tab, setTab] = useState<Tab>('notes')
+  const [view, setView] = useState<View>('note')
   const [draftTitle, setDraftTitle] = useState<string | null>(null)
+  const [notes, setNotes] = useState('')
+  const [summaryDraft, setSummaryDraft] = useState<string | null>(null)
+
+  // Refetches happen on every pipeline event; the notepad draft must survive
+  // them, so it is initialized only once per meeting.
+  const notesLoadedFor = useRef<string | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     let cancelled = false
     void window.api.getMeeting(meetingId).then((d) => {
-      if (!cancelled) setDetail(d)
+      if (cancelled) return
+      setDetail(d)
+      if (d && notesLoadedFor.current !== meetingId) {
+        notesLoadedFor.current = meetingId
+        setNotes(d.meeting.rawNotes)
+        setSummaryDraft(null)
+      }
     })
     return () => {
       cancelled = true
     }
   }, [meetingId, refreshKey])
+
+  useEffect(() => () => clearTimeout(saveTimer.current), [])
 
   if (!detail) return <div className="note-view" />
   const { meeting, transcript, hasAudio } = detail
@@ -56,6 +71,43 @@ export function MeetingDetailView({
       onRename(trimmed)
     }
   }
+
+  function onNotesChange(value: string) {
+    setNotes(value)
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      void window.api.saveNotes(meetingId, value)
+    }, 600)
+  }
+
+  function flushNotes() {
+    clearTimeout(saveTimer.current)
+    void window.api.saveNotes(meetingId, notes)
+  }
+
+  function commitSummary() {
+    if (summaryDraft === null) return
+    const draft = summaryDraft
+    setSummaryDraft(null)
+    if (draft === (meeting.enhancedNotes ?? '')) return
+    setDetail({ ...detail!, meeting: { ...meeting, enhancedNotes: draft } })
+    void window.api.saveSummary(meetingId, draft)
+  }
+
+  const showResults = !isRecording && (meeting.status === 'ready' || transcript.length > 0)
+
+  const notepad = (
+    <section className="notepad">
+      <h2 className="section-label">My notes</h2>
+      <textarea
+        className="notepad-input"
+        placeholder="Type your notes here…"
+        value={notes}
+        onChange={(e) => onNotesChange(e.target.value)}
+        onBlur={flushNotes}
+      />
+    </section>
+  )
 
   return (
     <div className="note-view">
@@ -100,6 +152,14 @@ export function MeetingDetailView({
               {dayLabel(meeting.createdAt)}
             </span>
             {duration && <span className="chip">{duration}</span>}
+            {showResults && (
+              <button
+                className={`chip chip-toggle ${view === 'transcript' ? 'active' : ''}`}
+                onClick={() => setView(view === 'transcript' ? 'note' : 'transcript')}
+              >
+                Transcript
+              </button>
+            )}
           </div>
 
           {meeting.status === 'processing' && (
@@ -124,46 +184,52 @@ export function MeetingDetailView({
             </div>
           )}
 
-          {isRecording && (
-            <p className="placeholder">
-              Recording — the transcript and notes appear here when you stop.
-            </p>
-          )}
-
-          {!isRecording && (meeting.status === 'ready' || transcript.length > 0) && (
+          {showResults && view === 'transcript' ? (
+            <section className="transcript">
+              {transcript.length === 0 && <p className="empty-state">No speech detected.</p>}
+              {transcript.map((s, i) => (
+                <div key={i} className={`segment ${s.speaker}`}>
+                  <span className="ts">{formatElapsed(s.startMs)}</span>
+                  <span className="speaker">{s.speaker === 'me' ? 'Me' : 'Them'}</span>
+                  <span className="text">{s.text}</span>
+                </div>
+              ))}
+            </section>
+          ) : (
             <>
-              <nav className="tabs">
-                <button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>
-                  Notes
-                </button>
-                <button
-                  className={tab === 'transcript' ? 'active' : ''}
-                  onClick={() => setTab('transcript')}
-                >
-                  Transcript
-                </button>
-              </nav>
+              {notepad}
 
-              {tab === 'notes' && (
-                <article className="notes">
-                  {meeting.enhancedNotes ? (
-                    <Markdown>{meeting.enhancedNotes}</Markdown>
-                  ) : (
-                    <p className="empty-state">No notes yet.</p>
-                  )}
-                </article>
+              {isRecording && (
+                <p className="placeholder">
+                  Recording — the transcript and summary appear here when you stop.
+                </p>
               )}
 
-              {tab === 'transcript' && (
-                <section className="transcript">
-                  {transcript.length === 0 && <p className="empty-state">No speech detected.</p>}
-                  {transcript.map((s, i) => (
-                    <div key={i} className={`segment ${s.speaker}`}>
-                      <span className="ts">{formatElapsed(s.startMs)}</span>
-                      <span className="speaker">{s.speaker === 'me' ? 'Me' : 'Them'}</span>
-                      <span className="text">{s.text}</span>
+              {showResults && (
+                <section className="summary">
+                  <h2 className="section-label">Summary</h2>
+                  {summaryDraft !== null ? (
+                    <textarea
+                      className="summary-input"
+                      value={summaryDraft}
+                      autoFocus
+                      onChange={(e) => setSummaryDraft(e.target.value)}
+                      onBlur={commitSummary}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setSummaryDraft(null)
+                      }}
+                    />
+                  ) : meeting.enhancedNotes ? (
+                    <div
+                      className="notes"
+                      title="Click to edit"
+                      onClick={() => setSummaryDraft(meeting.enhancedNotes ?? '')}
+                    >
+                      <Markdown>{meeting.enhancedNotes}</Markdown>
                     </div>
-                  ))}
+                  ) : (
+                    <p className="empty-state">No summary yet.</p>
+                  )}
                 </section>
               )}
             </>

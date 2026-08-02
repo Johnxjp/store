@@ -19,6 +19,10 @@ const api = {
   deleteMeeting: (id: string): Promise<void> => ipcRenderer.invoke(IPC.meetingsDelete, id),
   renameMeeting: (id: string, title: string): Promise<void> =>
     ipcRenderer.invoke(IPC.meetingsRename, id, title),
+  saveNotes: (id: string, notes: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.meetingsSetNotes, id, notes),
+  saveSummary: (id: string, summary: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.meetingsSetSummary, id, summary),
   onPipelineProgress: (cb: (p: PipelineProgress) => void): (() => void) =>
     on(IPC.pipelineProgress, cb),
   onMeetingUpdated: (cb: (meetingId: string) => void): (() => void) => on(IPC.meetingUpdated, cb)

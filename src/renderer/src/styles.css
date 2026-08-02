@@ -352,6 +352,17 @@ input {
   color: var(--ink-mid);
 }
 
+.chip-toggle:hover {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+
+.chip-toggle.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
 .placeholder {
   color: var(--ink-faint);
   font-size: 15px;
@@ -387,24 +398,50 @@ input {
   flex-shrink: 0;
 }
 
-.tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 24px;
+/* notepad (user's own notes) */
+
+.notepad {
+  margin-bottom: 28px;
 }
 
-.tabs button {
-  padding: 6px 2px;
-  margin-right: 18px;
-  margin-bottom: -1px;
-  color: var(--ink-faint);
+.section-label {
+  font-size: 13px;
   font-weight: 500;
-  border-bottom: 2px solid transparent;
+  color: var(--ink-faint);
+  margin-bottom: 6px;
 }
 
-.tabs button.active {
+.notepad-input,
+.summary-input {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  outline: none;
+  resize: none;
+  font: inherit;
   color: var(--ink);
-  border-bottom-color: var(--ink);
+  font-size: 15px;
+  line-height: 1.65;
+  field-sizing: content;
+}
+
+.notepad-input {
+  min-height: 3.3em;
+}
+
+.notepad-input::placeholder {
+  color: var(--ink-faint);
+}
+
+/* summary — rendered markdown that turns into a textarea on click */
+
+.summary .notes {
+  cursor: text;
+}
+
+.summary-input {
+  min-height: 10em;
 }
 
 /* notes markdown */

@@ -42,6 +42,21 @@ describe('meetings', () => {
     expect(db.getMeeting('m1')).toMatchObject({ title: 'Quarterly planning' })
   })
 
+  it('stores raw notes typed in the notepad', () => {
+    create()
+    db.setRawNotes('m1', 'ask about Q3 budget')
+    expect(db.getMeeting('m1')).toMatchObject({ rawNotes: 'ask about Q3 budget' })
+    db.setRawNotes('m1', '')
+    expect(db.getMeeting('m1')).toMatchObject({ rawNotes: '' })
+  })
+
+  it('overwrites enhanced notes when the summary is edited', () => {
+    create()
+    db.setEnhancedNotes('m1', '## Summary\nGenerated.')
+    db.setEnhancedNotes('m1', '## Summary\nEdited by hand.')
+    expect(db.getMeeting('m1')).toMatchObject({ enhancedNotes: '## Summary\nEdited by hand.' })
+  })
+
   it('stores enhanced notes and recording end', () => {
     create()
     db.setRecordingEnded('m1', 5000)

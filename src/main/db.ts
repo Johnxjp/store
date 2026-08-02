@@ -131,6 +131,10 @@ export function setMeetingTitle(id: string, title: string): void {
   db.prepare('UPDATE meetings SET title = ? WHERE id = ?').run(title, id)
 }
 
+export function setRawNotes(id: string, notes: string): void {
+  db.prepare('UPDATE meetings SET raw_notes = ? WHERE id = ?').run(notes, id)
+}
+
 export function setEnhancedNotes(id: string, notes: string): void {
   db.prepare('UPDATE meetings SET enhanced_notes = ? WHERE id = ?').run(notes, id)
 }

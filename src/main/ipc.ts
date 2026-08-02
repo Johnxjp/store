@@ -101,6 +101,14 @@ export function registerIpcHandlers(): void {
     db.setMeetingTitle(id, trimmed)
   })
 
+  ipcMain.handle(IPC.meetingsSetNotes, (_event, id: string, notes: string): void => {
+    db.setRawNotes(id, notes)
+  })
+
+  ipcMain.handle(IPC.meetingsSetSummary, (_event, id: string, summary: string): void => {
+    db.setEnhancedNotes(id, summary)
+  })
+
   ipcMain.handle(IPC.meetingsDelete, async (_event, id: string): Promise<void> => {
     const meeting = db.getMeeting(id)
     if (!meeting) return
