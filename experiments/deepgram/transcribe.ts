@@ -55,7 +55,9 @@ for (const rel of FILES) {
     body: audio
   })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`)
-  const json = await res.json()
+  const json = (await res.json()) as {
+    results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> }
+  }
   const seconds = ((Date.now() - t0) / 1000).toFixed(1)
   const alt = json.results?.channels?.[0]?.alternatives?.[0]
   const text: string = alt?.transcript ?? ''

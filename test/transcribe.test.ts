@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   boostGainDb,
   isSilent,
+  parseFluidJson,
   parseMaxVolumeDb,
-  parseWhisperJson,
   SILENCE_MAX_DB,
-  TARGET_PEAK_DB
+  TARGET_PEAK_DB,
+  wordsToSegments,
+  type FluidWord
 } from '../src/main/transcribe'
 
 describe('parseMaxVolumeDb', () => {
@@ -56,15 +58,55 @@ describe('boostGainDb', () => {
   })
 })
 
-describe('parseWhisperJson', () => {
-  it('maps whisper-cli output to segments', () => {
+describe('parseFluidJson', () => {
+  it('reads the fluid-transcribe word array', () => {
     const raw = JSON.stringify({
-      transcription: [{ offsets: { from: 0, to: 1500 }, text: ' hello' }]
+      words: [{ word: 'Hello.', start: 1.2, end: 1.8 }]
     })
-    expect(parseWhisperJson(raw)).toEqual([{ fromMs: 0, toMs: 1500, text: ' hello' }])
+    expect(parseFluidJson(raw)).toEqual([{ word: 'Hello.', start: 1.2, end: 1.8 }])
   })
 
-  it('handles missing transcription array', () => {
-    expect(parseWhisperJson('{}')).toEqual([])
+  it('handles a missing words array', () => {
+    expect(parseFluidJson('{}')).toEqual([])
+  })
+})
+
+const w = (word: string, start: number, end: number): FluidWord => ({ word, start, end })
+
+describe('wordsToSegments', () => {
+  it('returns nothing for no words', () => {
+    expect(wordsToSegments([])).toEqual([])
+  })
+
+  it('groups words up to sentence-ending punctuation', () => {
+    const segments = wordsToSegments([
+      w('Hi,', 0.5, 0.7),
+      w('there.', 0.8, 1.1),
+      w('How', 1.3, 1.5),
+      w('are', 1.5, 1.6),
+      w('you?', 1.6, 1.9)
+    ])
+    expect(segments).toEqual([
+      { fromMs: 500, toMs: 1100, text: 'Hi, there.' },
+      { fromMs: 1300, toMs: 1900, text: 'How are you?' }
+    ])
+  })
+
+  it('treats punctuation followed by a closing quote as a sentence end', () => {
+    const segments = wordsToSegments([w('"Done."', 0, 0.4), w('Next', 0.5, 0.8)])
+    expect(segments.map((s) => s.text)).toEqual(['"Done."', 'Next'])
+  })
+
+  it('splits on a long pause even without punctuation', () => {
+    const segments = wordsToSegments([w('so', 0, 0.3), w('anyway', 2.5, 2.9)])
+    expect(segments).toEqual([
+      { fromMs: 0, toMs: 300, text: 'so' },
+      { fromMs: 2500, toMs: 2900, text: 'anyway' }
+    ])
+  })
+
+  it('keeps a short pause inside one segment', () => {
+    const segments = wordsToSegments([w('so', 0, 0.3), w('anyway', 1.0, 1.4)])
+    expect(segments).toEqual([{ fromMs: 0, toMs: 1400, text: 'so anyway' }])
   })
 })

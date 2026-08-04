@@ -11,10 +11,24 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { parseWhisperJson, resolveBin, SILENCE_MAX_DB } from '../../src/main/transcribe'
-import type { WhisperSegment } from '../../src/main/merge'
+import { resolveBin, SILENCE_MAX_DB } from '../../src/main/transcribe'
+import type { StreamSegment } from '../../src/main/merge'
 
 const execFileAsync = promisify(execFile)
+
+// Whisper-specific JSON parsing lives here since the app moved to parakeet.
+interface WhisperCliOutput {
+  transcription?: Array<{ offsets: { from: number; to: number }; text: string }>
+}
+
+export function parseWhisperJson(raw: string): StreamSegment[] {
+  const parsed = JSON.parse(raw) as WhisperCliOutput
+  return (parsed.transcription ?? []).map((t) => ({
+    fromMs: t.offsets.from,
+    toMs: t.offsets.to,
+    text: t.text
+  }))
+}
 
 const SAMPLE_RATE = 16000
 const BYTES_PER_SAMPLE = 2
@@ -37,7 +51,7 @@ export interface ChunkResult {
   startMs: number
   endMs: number
   skippedAsSilent: boolean
-  segments: WhisperSegment[]
+  segments: StreamSegment[]
 }
 
 export class StreamingTranscriber {

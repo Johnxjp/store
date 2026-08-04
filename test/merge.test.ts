@@ -4,10 +4,10 @@ import {
   formatTimestamp,
   formatTranscript,
   mergeTranscripts,
-  type WhisperSegment
+  type StreamSegment
 } from '../src/main/merge'
 
-const seg = (fromMs: number, toMs: number, text: string): WhisperSegment => ({ fromMs, toMs, text })
+const seg = (fromMs: number, toMs: number, text: string): StreamSegment => ({ fromMs, toMs, text })
 
 describe('mergeTranscripts', () => {
   it('interleaves mic and system segments chronologically', () => {

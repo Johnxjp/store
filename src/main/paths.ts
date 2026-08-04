@@ -9,5 +9,6 @@ import { join } from 'node:path'
 export const projectRoot = join(import.meta.dirname, '..', '..')
 export const dataDir = join(projectRoot, 'data')
 export const recordingsDir = join(dataDir, 'recordings')
-export const modelPath = join(dataDir, 'models', 'ggml-large-v3-turbo.bin')
+export const asrModelsDir = join(dataDir, 'models', 'fluidaudio')
 export const audioCaptureBin = join(projectRoot, 'resources', 'bin', 'audio-capture')
+export const fluidTranscribeBin = join(projectRoot, 'resources', 'bin', 'fluid-transcribe')

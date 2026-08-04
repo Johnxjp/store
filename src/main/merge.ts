@@ -1,13 +1,13 @@
 import type { Speaker, TranscriptSegment } from '../shared/types'
 
-export interface WhisperSegment {
+export interface StreamSegment {
   fromMs: number
   toMs: number
   text: string
 }
 
 export interface StreamTranscript {
-  segments: WhisperSegment[]
+  segments: StreamSegment[]
   /** Wall-clock epoch ms of the start of this stream's WAV file. */
   epochMs: number
 }
@@ -16,10 +16,10 @@ const COALESCE_GAP_MS = 2000
 const REPEAT_RUN_THRESHOLD = 3
 
 /**
- * Merges the mic ("me") and system-audio ("them") whisper transcripts into a
- * single chronological timeline. Timestamps become relative to the earliest
- * stream start. Whisper hallucination artifacts (silence fillers, repeated
- * phrases) are dropped, and consecutive same-speaker segments are coalesced.
+ * Merges the mic ("me") and system-audio ("them") transcripts into a single
+ * chronological timeline. Timestamps become relative to the earliest stream
+ * start. ASR hallucination artifacts (silence fillers, repeated phrases) are
+ * dropped, and consecutive same-speaker segments are coalesced.
  */
 export function mergeTranscripts(
   mic: StreamTranscript,
@@ -67,7 +67,7 @@ const PHRASE_BLOCKLIST = new Set([
  * "Thank you.", and short phrases repeated over and over. Each stream is
  * mostly silence while the other side talks, so these are common here.
  */
-export function dropHallucinations(segments: WhisperSegment[]): WhisperSegment[] {
+export function dropHallucinations(segments: StreamSegment[]): StreamSegment[] {
   const nonEmpty = segments.filter((s) => {
     const t = s.text.trim()
     if (t === '') return false
@@ -92,7 +92,7 @@ export function dropHallucinations(segments: WhisperSegment[]): WhisperSegment[]
   return nonEmpty.filter((_, i) => keep[i])
 }
 
-function normalized(s: WhisperSegment): string {
+function normalized(s: StreamSegment): string {
   return s.text.trim().toLowerCase()
 }
 

@@ -4,7 +4,7 @@
 // Usage: npx tsx experiments/run-streaming.ts [recording-dir]
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { parseWhisperJson } from '../src/main/transcribe'
+import { parseWhisperJson } from './streaming/streaming-transcriber'
 import { wordErrorRate } from './lib/wer'
 import { StreamingTranscriber } from './streaming/streaming-transcriber'
 

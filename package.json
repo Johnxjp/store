@@ -9,7 +9,6 @@
     "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
     "build:native": "./scripts/build-native.sh",
-    "download-model": "node scripts/download-model.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",

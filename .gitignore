@@ -5,6 +5,8 @@ data/
 experiments/results/streaming/*-work/
 resources/bin/
 native/*/.build/
+native/vendor/
+.venv/
 *.log
 .DS_Store
 __pycache__/

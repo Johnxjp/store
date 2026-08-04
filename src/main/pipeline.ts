@@ -4,8 +4,7 @@ import type { PipelineStage } from '../shared/types'
 import { readConfig } from './config'
 import * as db from './db'
 import { buildSummaryPrompt, generateNotes } from './enhance'
-import { mergeTranscripts, type WhisperSegment } from './merge'
-import { modelPath } from './paths'
+import { mergeTranscripts, type StreamSegment } from './merge'
 import {
   boostGainDb,
   convertTo16k,
@@ -30,8 +29,8 @@ export async function readSessionFile(dir: string): Promise<SessionAnchors> {
 
 /**
  * Convert to 16 kHz mono and decide whether the stream is worth transcribing.
- * Silent streams are skipped (Whisper hallucinates on silence); quiet ones are
- * re-converted with a gain boost so Whisper sees healthy levels.
+ * Silent streams are skipped (transcribing silence yields only garbage); quiet
+ * ones are re-converted with a gain boost so the ASR model sees healthy levels.
  */
 async function prepare16k(srcWav: string, wav16k: string): Promise<boolean> {
   await convertTo16k(srcWav, wav16k)
@@ -82,11 +81,11 @@ export async function runPipeline(
         ])
       )
 
-      const emptyStream = Promise.resolve<WhisperSegment[]>([])
+      const emptyStream = Promise.resolve<StreamSegment[]>([])
       const [micSegments, systemSegments] = await timed('transcribing', () =>
         Promise.all([
-          micAudible ? transcribeWav(mic16k, modelPath) : emptyStream,
-          systemAudible ? transcribeWav(system16k, modelPath) : emptyStream
+          micAudible ? transcribeWav(mic16k) : emptyStream,
+          systemAudible ? transcribeWav(system16k) : emptyStream
         ])
       )
 
