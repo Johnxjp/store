@@ -18,12 +18,16 @@ describe('buildSummaryPrompt', () => {
 
   it('instructs the summary content and guardrails', () => {
     const p = buildSummaryPrompt({ title: 't', dateLabel: 'd', transcript })
-    expect(p.system).toContain('brief overview of the core purpose of the meeting')
-    expect(p.system).toContain('key topics covered')
-    expect(p.system).toContain('key decisions')
-    expect(p.system).toContain('action items')
-    expect(p.system).toContain('do not force or hallucinate')
-    expect(p.system).toContain('No preamble')
+    const system = p.system.replace(/\s+/g, ' ')
+    expect(system).toContain('core purpose of the meeting')
+    expect(system).toContain('"Overview" section')
+    expect(system).toContain('topics actually discussed')
+    expect(system).toContain('never guess')
+    expect(system).toContain('"Next steps" section')
+    expect(system).toContain('if no one committed to anything, leave the section out')
+    expect(system).toContain('The owner is the speaker of the sentence that made the commitment')
+    expect(system).toContain('no outside knowledge')
+    expect(system).toContain('no preamble')
   })
 })
 
