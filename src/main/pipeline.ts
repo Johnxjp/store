@@ -104,14 +104,18 @@ export async function runPipeline(
       }
     }
 
+    const config = readConfig()
     const notes = await timed('summarizing', () =>
       generateNotes(
-        buildSummaryPrompt({
-          title: meeting.title,
-          dateLabel: new Date(meeting.createdAt).toLocaleString(),
-          transcript: segments
-        }),
-        readConfig().ollamaModel
+        buildSummaryPrompt(
+          {
+            title: meeting.title,
+            dateLabel: new Date(meeting.createdAt).toLocaleString(),
+            transcript: segments
+          },
+          config.maxTranscriptChars
+        ),
+        config
       )
     )
     db.setEnhancedNotes(meetingId, notes)

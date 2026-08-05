@@ -1,13 +1,6 @@
 import type { TranscriptSegment } from '../shared/types'
+import type { Config } from './config'
 import { formatTranscript } from './merge'
-
-const OLLAMA_URL = 'http://localhost:11434/api/chat'
-// Must fit NUM_CTX with room for the system prompt and the generated notes:
-// ~4 chars/token → 110k chars ≈ 27k tokens, leaving ~5k of the 32k window.
-const MAX_TRANSCRIPT_CHARS = 110_000
-// Without an explicit num_ctx Ollama defaults to 4096 and silently truncates
-// the transcript (a 1h meeting is ~16k tokens). 32768 is qwen2.5's native max.
-const NUM_CTX = 32_768
 
 export interface SummaryInput {
   title: string
@@ -20,7 +13,7 @@ export interface ChatPrompt {
   user: string
 }
 
-export function buildSummaryPrompt(input: SummaryInput): ChatPrompt {
+export function buildSummaryPrompt(input: SummaryInput, maxTranscriptChars: number): ChatPrompt {
   // Iterated against real transcripts in experiments/prompt_optimisation
   // (winning variant v11) — see the ANALYSIS.md there before rewording:
   // qwen2.5:14b regresses on attribution from small perturbations.
@@ -75,7 +68,7 @@ export function buildSummaryPrompt(input: SummaryInput): ChatPrompt {
     `Date: ${input.dateLabel}`,
     '',
     '### Transcript',
-    truncateMiddle(formatTranscript(input.transcript), MAX_TRANSCRIPT_CHARS)
+    truncateMiddle(formatTranscript(input.transcript), maxTranscriptChars)
   ].join('\n')
 
   return { system, user }
@@ -91,21 +84,21 @@ interface OllamaChatResponse {
   message?: { content?: string }
 }
 
-export async function generateNotes(prompt: ChatPrompt, model: string): Promise<string> {
-  const res = await fetch(OLLAMA_URL, {
+export async function generateNotes(prompt: ChatPrompt, config: Config): Promise<string> {
+  const res = await fetch(`${config.ollamaUrl}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model,
+      model: config.ollamaModel,
       stream: false,
-      options: { temperature: 0, num_ctx: NUM_CTX },
+      options: { temperature: 0, num_ctx: config.numCtx },
       messages: [
         { role: 'system', content: prompt.system },
         { role: 'user', content: prompt.user }
       ]
     })
   }).catch(() => {
-    throw new Error('Cannot reach Ollama at localhost:11434 — is it running? (ollama serve)')
+    throw new Error(`Cannot reach Ollama at ${config.ollamaUrl} — is it running? (ollama serve)`)
   })
   if (!res.ok) {
     throw new Error(`Ollama error ${res.status}: ${await res.text()}`)

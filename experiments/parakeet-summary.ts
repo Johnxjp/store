@@ -7,6 +7,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readConfig } from '../src/main/config'
 import { buildSummaryPrompt, generateNotes } from '../src/main/enhance'
 import { formatTranscript } from '../src/main/merge'
 import type { TranscriptSegment } from '../src/shared/types'
@@ -65,7 +66,7 @@ const db = new DatabaseSync('data/db.sqlite', { readOnly: true })
 const meeting = db
   .prepare('select title, created_at, enhanced_notes from meetings where id = ?')
   .get(meetingId) as { title: string; created_at: number; enhanced_notes: string | null }
-const config = JSON.parse(readFileSync('data/config.json', 'utf-8')) as { ollamaModel: string }
+const config = readConfig()
 
 const dateLabel = new Date(meeting.created_at).toLocaleDateString('en-GB', {
   weekday: 'long',
@@ -78,9 +79,12 @@ writeFileSync(join(outDir, 'transcript-parakeet.md'), formatTranscript(coalesced
 writeFileSync(join(outDir, 'summary-current.md'), (meeting.enhanced_notes ?? '(none)') + '\n')
 
 console.log(`${coalesced.length} merged segments; summarizing with ${config.ollamaModel}...`)
-const prompt = buildSummaryPrompt({ title: meeting.title, dateLabel, transcript: coalesced })
+const prompt = buildSummaryPrompt(
+  { title: meeting.title, dateLabel, transcript: coalesced },
+  config.maxTranscriptChars
+)
 const started = Date.now()
-const notes = await generateNotes(prompt, config.ollamaModel)
+const notes = await generateNotes(prompt, config)
 console.log(`summary in ${((Date.now() - started) / 1000).toFixed(0)}s`)
 writeFileSync(join(outDir, 'summary-parakeet-newprompt.md'), notes + '\n')
 

@@ -9,7 +9,10 @@ const transcript: TranscriptSegment[] = [
 
 describe('buildSummaryPrompt', () => {
   it('includes metadata and the labeled transcript', () => {
-    const p = buildSummaryPrompt({ title: 'Launch sync', dateLabel: '13/07/2026', transcript })
+    const p = buildSummaryPrompt(
+      { title: 'Launch sync', dateLabel: '13/07/2026', transcript },
+      110_000
+    )
     expect(p.user).toContain('Meeting: Launch sync')
     expect(p.user).toContain('Date: 13/07/2026')
     expect(p.user).toContain('[00:00] Me: What is the launch date?')
@@ -17,14 +20,14 @@ describe('buildSummaryPrompt', () => {
   })
 
   it('instructs the summary content and guardrails', () => {
-    const p = buildSummaryPrompt({ title: 't', dateLabel: 'd', transcript })
+    const p = buildSummaryPrompt({ title: 't', dateLabel: 'd', transcript }, 110_000)
     const system = p.system.replace(/\s+/g, ' ')
     expect(system).toContain('core purpose of the meeting')
     expect(system).toContain('"Overview" section')
     expect(system).toContain('topics actually discussed')
     expect(system).toContain('never guess')
     expect(system).toContain('"Next steps" section')
-    expect(system).toContain('if no one committed to anything, leave the section out')
+    expect(system).toContain('otherwise, leave the section out entirely')
     expect(system).toContain('The owner is the speaker of the sentence that made the commitment')
     expect(system).toContain('no outside knowledge')
     expect(system).toContain('no preamble')

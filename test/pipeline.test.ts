@@ -21,7 +21,12 @@ vi.mock('../src/main/enhance', async (importOriginal) => ({
 }))
 
 vi.mock('../src/main/config', () => ({
-  readConfig: vi.fn(() => ({ ollamaModel: 'test-model' }))
+  readConfig: vi.fn(() => ({
+    ollamaModel: 'test-model',
+    ollamaUrl: 'http://localhost:11434',
+    numCtx: 32_768,
+    maxTranscriptChars: 110_000
+  }))
 }))
 
 async function createMeetingWithAudioDir(id: string): Promise<string> {
