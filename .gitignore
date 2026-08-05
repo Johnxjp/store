@@ -13,3 +13,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.tsbuildinfo
+
+# Real-meeting data must never be committed (transcripts, notes, generated summaries)
+experiments/prompt_optimisation/*.json
+experiments/prompt_optimisation/*_notes.md
+experiments/prompt_optimisation/outputs/
+experiments/results/streaming/
+experiments/results/parakeet-summary-*/
