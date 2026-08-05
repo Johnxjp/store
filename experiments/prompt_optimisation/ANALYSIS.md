@@ -25,7 +25,7 @@ to the wrong person. Two root causes:
   side-by-side comparison. Temperature 0 so reruns are comparable.
 - Scoring: a hand-built checklist of 16 facts per meeting, verified against
   the transcript — concrete numbers, named systems, specific stories, and
-  the closing commitments. Count facts present *and correct*; an attribution
+  the closing commitments. Count facts present _and correct_; an attribution
   error counts as wrong even if the fact appears.
 - Two test meetings with different shapes (a hiring-manager interview and a
   recruiter screen) so a prompt change that helps one can be checked for
