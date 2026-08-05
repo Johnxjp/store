@@ -215,10 +215,10 @@ hence the explicit `aeval` inversion.)
 
 Probe windows on the ba784… recording:
 
-| Window                     | Before (mean/max) | After (mean/max) |
-| -------------------------- | ----------------- | ---------------- |
-| bleed only (far side talking) | −43.9 / −25.0 dB | −55.8 / −28.4 dB |
-| own voice (near side talking) | −42.8 / −19.0 dB | −42.8 / −19.0 dB |
+| Window                        | Before (mean/max) | After (mean/max) |
+| ----------------------------- | ----------------- | ---------------- |
+| bleed only (far side talking) | −43.9 / −25.0 dB  | −55.8 / −28.4 dB |
+| own voice (near side talking) | −42.8 / −19.0 dB  | −42.8 / −19.0 dB |
 
 −12 dB of bleed suppression with the near-side voice untouched — the same residual
 level Apple's live AEC leaves. Functionally it is a partial win: Whisper
