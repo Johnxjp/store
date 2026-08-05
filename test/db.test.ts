@@ -6,7 +6,7 @@ beforeEach(() => {
 })
 
 const create = (id = 'm1') =>
-  db.createMeeting({ id, title: 'Standup', audioDir: `/tmp/${id}`, startedAt: 1000 })
+  db.createMeeting({ id, title: 'Standup', audioDir: `/tmp/${id}`, createdAt: 1000 })
 
 describe('meetings', () => {
   it('creates and fetches a meeting in recording state', () => {
@@ -22,9 +22,16 @@ describe('meetings', () => {
     expect(db.getMeeting('m1')).toEqual(m)
   })
 
+  it('leaves recording start unset until capture goes live', () => {
+    const m = create()
+    expect(m.recordingStartedAt).toBeNull()
+    db.setRecordingStarted('m1', 1500)
+    expect(db.getMeeting('m1')).toMatchObject({ recordingStartedAt: 1500 })
+  })
+
   it('lists meetings newest first', () => {
-    db.createMeeting({ id: 'a', title: 'Old', audioDir: '/tmp/a', startedAt: 1 })
-    db.createMeeting({ id: 'b', title: 'New', audioDir: '/tmp/b', startedAt: 2 })
+    db.createMeeting({ id: 'a', title: 'Old', audioDir: '/tmp/a', createdAt: 1 })
+    db.createMeeting({ id: 'b', title: 'New', audioDir: '/tmp/b', createdAt: 2 })
     expect(db.listMeetings().map((m) => m.id)).toEqual(['b', 'a'])
   })
 

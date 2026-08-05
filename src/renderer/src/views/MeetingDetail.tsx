@@ -60,6 +60,9 @@ export function MeetingDetailView({
   if (!detail) return <div className="note-view" />
   const { meeting, transcript, hasAudio } = detail
   const isRecording = meeting.status === 'recording'
+  // recording_started_at is set only once audio buffers actually flow, so a
+  // null value while 'recording' means capture is still spinning up.
+  const isStarting = isRecording && meeting.recordingStartedAt === null
   const duration = durationLabel(meeting)
 
   function commitTitle() {
@@ -199,7 +202,14 @@ export function MeetingDetailView({
             <>
               {notepad}
 
-              {isRecording && (
+              {isStarting && (
+                <div className="status-line">
+                  <span className="live-dot" />
+                  Starting audio capture…
+                </div>
+              )}
+
+              {isRecording && !isStarting && (
                 <p className="placeholder">
                   Recording — the transcript and summary appear here when you stop.
                 </p>
@@ -237,7 +247,7 @@ export function MeetingDetailView({
         </article>
       </div>
 
-      {isRecording && (
+      {isRecording && !isStarting && (
         <RecordBar startedAt={meeting.recordingStartedAt ?? meeting.createdAt} onStop={onStop} />
       )}
     </div>

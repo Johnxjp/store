@@ -13,6 +13,8 @@ import { Recorder } from './recorder'
 interface Session {
   recorder: Recorder
   meetingId: string
+  /** Resolves true once capture is live (anchors written), false if it failed to start. */
+  starting: Promise<boolean>
 }
 
 let session: Session | null = null
@@ -41,15 +43,15 @@ export function abortActiveRecording(): Promise<void> | null {
 }
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle(IPC.recordingStart, async (): Promise<Meeting> => {
+  // Returns as soon as the meeting row exists so the note opens instantly;
+  // audio capture (AEC init, Bluetooth profile switch — seconds) spins up in
+  // the background. recording_started_at is set once buffers actually flow,
+  // and meetingUpdated tells the renderer to swap "starting" for the live bar.
+  ipcMain.handle(IPC.recordingStart, async (event): Promise<Meeting> => {
     if (session) throw new Error('already recording')
     const id = randomUUID()
     const dir = join(recordingsDir, id)
     await mkdir(dir, { recursive: true })
-
-    const recorder = new Recorder(audioCaptureBin)
-    const anchors = await recorder.start(dir)
-    await writeSessionFile(dir, anchors)
 
     const now = Date.now()
     const meeting = db.createMeeting({
@@ -61,22 +63,43 @@ export function registerIpcHandlers(): void {
         minute: '2-digit'
       })}`,
       audioDir: dir,
-      startedAt: now
+      createdAt: now
     })
-    session = { recorder, meetingId: id }
+
+    const recorder = new Recorder(audioCaptureBin)
+    const sender = event.sender
+    const starting = recorder.start(dir).then(
+      async (anchors) => {
+        await writeSessionFile(dir, anchors)
+        db.setRecordingStarted(id, Math.min(anchors.micEpochMs, anchors.systemEpochMs))
+        if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, id)
+        return true
+      },
+      (err: unknown) => {
+        if (session?.meetingId === id) session = null
+        db.setMeetingStatus(id, 'error', err instanceof Error ? err.message : String(err))
+        if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, id)
+        return false
+      }
+    )
+    session = { recorder, meetingId: id, starting }
     return meeting
   })
 
   ipcMain.handle(IPC.recordingStop, async (event): Promise<Meeting> => {
     if (!session) throw new Error('not recording')
-    const { recorder, meetingId } = session
+    const { recorder, meetingId, starting } = session
     session = null
 
-    await recorder.stop()
-    db.setRecordingEnded(meetingId, Date.now())
+    // Capture may still be spinning up; wait for it to go live (or fail)
+    // before stopping. On failure the meeting is already marked 'error'.
+    if (await starting) {
+      await recorder.stop()
+      db.setRecordingEnded(meetingId, Date.now())
 
-    // Pipeline runs in the background; the renderer follows progress events.
-    void runPipelineNotifying(meetingId, event.sender).catch(() => {})
+      // Pipeline runs in the background; the renderer follows progress events.
+      void runPipelineNotifying(meetingId, event.sender).catch(() => {})
+    }
     return db.getMeeting(meetingId)!
   })
 

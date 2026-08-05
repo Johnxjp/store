@@ -71,17 +71,23 @@ function toMeeting(row: MeetingRow): Meeting {
   }
 }
 
+// recording_started_at stays NULL until audio capture actually delivers
+// buffers — the renderer uses that gap to show a "starting" state.
 export function createMeeting(meeting: {
   id: string
   title: string
   audioDir: string
-  startedAt: number
+  createdAt: number
 }): Meeting {
   db.prepare(
-    `INSERT INTO meetings (id, title, status, created_at, recording_started_at, audio_dir)
-     VALUES (?, ?, 'recording', ?, ?, ?)`
-  ).run(meeting.id, meeting.title, meeting.startedAt, meeting.startedAt, meeting.audioDir)
+    `INSERT INTO meetings (id, title, status, created_at, audio_dir)
+     VALUES (?, ?, 'recording', ?, ?)`
+  ).run(meeting.id, meeting.title, meeting.createdAt, meeting.audioDir)
   return getMeeting(meeting.id)!
+}
+
+export function setRecordingStarted(id: string, startedAt: number): void {
+  db.prepare('UPDATE meetings SET recording_started_at = ? WHERE id = ?').run(startedAt, id)
 }
 
 export function getMeeting(id: string): Meeting | null {
