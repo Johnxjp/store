@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { PipelineStage } from '../shared/types'
 import { readConfig } from './config'
 import * as db from './db'
-import { buildSummaryPrompt, generateNotes } from './enhance'
+import { buildSummaryPrompt, extractSummary, generateNotes } from './enhance'
 import { mergeTranscripts, type StreamSegment } from './merge'
 import {
   boostGainDb,
@@ -104,8 +104,20 @@ export async function runPipeline(
       }
     }
 
+    // Third gate: recordings shorter than 30s rarely have enough content to
+    // summarize meaningfully, and the LLM tends to hallucinate structure onto them.
+    const durationMs =
+      meeting.recordingStartedAt != null && meeting.recordingEndedAt != null
+        ? meeting.recordingEndedAt - meeting.recordingStartedAt
+        : null
+    if (durationMs !== null && durationMs < 30_000) {
+      db.setEnhancedNotes(meetingId, '_Transcript too short to generate a summary._')
+      db.setMeetingStatus(meetingId, 'ready')
+      return
+    }
+
     const config = readConfig()
-    const notes = await timed('summarizing', () =>
+    const raw = await timed('summarizing', () =>
       generateNotes(
         buildSummaryPrompt(
           {
@@ -118,7 +130,8 @@ export async function runPipeline(
         config
       )
     )
-    db.setEnhancedNotes(meetingId, notes)
+    const notes = extractSummary(raw)
+    db.setEnhancedNotes(meetingId, notes || '_No substantial content to summarize._')
     db.setMeetingStatus(meetingId, 'ready')
   } catch (err) {
     db.setMeetingStatus(meetingId, 'error', err instanceof Error ? err.message : String(err))

@@ -1,7 +1,7 @@
 // Headless driver for summary generation: transcript segments in, notes out.
 // Usage: npx tsx scripts/test-enhance.ts
 import { readConfig } from '../src/main/config'
-import { buildSummaryPrompt, generateNotes } from '../src/main/enhance'
+import { buildSummaryPrompt, extractSummary, generateNotes } from '../src/main/enhance'
 import type { TranscriptSegment } from '../src/shared/types'
 
 const transcript: TranscriptSegment[] = [
@@ -54,9 +54,9 @@ const prompt = buildSummaryPrompt(
 )
 console.error('calling ollama...')
 const started = Date.now()
-const notes = await generateNotes(prompt, {
+const raw = await generateNotes(prompt, {
   ...config,
   ollamaModel: process.argv[2] ?? 'llama3.2'
 })
 console.error(`done in ${((Date.now() - started) / 1000).toFixed(1)}s\n`)
-console.log(notes)
+console.log(extractSummary(raw))

@@ -17,7 +17,7 @@ vi.mock('../src/main/transcribe', () => ({
 
 vi.mock('../src/main/enhance', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/main/enhance')>()),
-  generateNotes: vi.fn(async () => '## Notes')
+  generateNotes: vi.fn(async () => '<summary>## Notes</summary>')
 }))
 
 vi.mock('../src/main/config', () => ({
@@ -32,7 +32,7 @@ vi.mock('../src/main/config', () => ({
 async function createMeetingWithAudioDir(id: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'pipeline-test-'))
   await writeFile(join(dir, 'session.json'), JSON.stringify({ micEpochMs: 0, systemEpochMs: 0 }))
-  db.createMeeting({ id, title: 'Standup', audioDir: dir, startedAt: 1000 })
+  db.createMeeting({ id, title: 'Standup', audioDir: dir, createdAt: 1000 })
   return dir
 }
 
@@ -64,8 +64,58 @@ describe('runPipeline', () => {
     expect(db.getMeeting('m1')).toMatchObject({ status: 'ready', enhancedNotes: '## Notes' })
   })
 
+  it('skips summarization for recordings shorter than 30 seconds', async () => {
+    await createMeetingWithAudioDir('m1')
+    db.setRecordingStarted('m1', 1000)
+    db.setRecordingEnded('m1', 1000 + 29_000)
+
+    await runPipeline('m1', () => {})
+
+    expect(transcribeWav).toHaveBeenCalledTimes(2)
+    expect(generateNotes).not.toHaveBeenCalled()
+    expect(db.getMeeting('m1')).toMatchObject({
+      status: 'ready',
+      enhancedNotes: '_Transcript too short to generate a summary._'
+    })
+  })
+
+  it('summarizes recordings at least 30 seconds long', async () => {
+    await createMeetingWithAudioDir('m1')
+    db.setRecordingStarted('m1', 1000)
+    db.setRecordingEnded('m1', 1000 + 30_000)
+
+    await runPipeline('m1', () => {})
+
+    expect(generateNotes).toHaveBeenCalledTimes(1)
+    expect(db.getMeeting('m1')).toMatchObject({ status: 'ready', enhancedNotes: '## Notes' })
+  })
+
+  it('stores a fallback message when the model returns empty summary tags', async () => {
+    vi.mocked(generateNotes).mockResolvedValueOnce('<summary></summary>')
+    await createMeetingWithAudioDir('m1')
+    db.setRecordingStarted('m1', 1000)
+    db.setRecordingEnded('m1', 1000 + 30_000)
+
+    await runPipeline('m1', () => {})
+
+    expect(db.getMeeting('m1')).toMatchObject({
+      status: 'ready',
+      enhancedNotes: '_No substantial content to summarize._'
+    })
+  })
+
+  it('marks the meeting error when the model response has no summary tags', async () => {
+    vi.mocked(generateNotes).mockResolvedValueOnce('## Notes with no tags')
+    await createMeetingWithAudioDir('m1')
+    db.setRecordingStarted('m1', 1000)
+    db.setRecordingEnded('m1', 1000 + 30_000)
+
+    await expect(runPipeline('m1', () => {})).rejects.toThrow('<summary>')
+    expect(db.getMeeting('m1')?.status).toBe('error')
+  })
+
   it('marks the meeting error when transcription cannot start', async () => {
-    db.createMeeting({ id: 'm1', title: 'Standup', audioDir: '/nonexistent', startedAt: 1000 })
+    db.createMeeting({ id: 'm1', title: 'Standup', audioDir: '/nonexistent', createdAt: 1000 })
 
     await expect(runPipeline('m1', () => {})).rejects.toThrow()
     expect(db.getMeeting('m1')?.status).toBe('error')
