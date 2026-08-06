@@ -1,6 +1,6 @@
 # Store: A local meeting note taker
 
-An AI-powered meeting note taker that is fully local. The note-taker functions like Granola where an AI does not join a meeting but instead, the microphone and system audio is recorded in the background, transcribed and then summarised into notes. All processing is done locally using open-source models (**no audio or text ever leaves the laptop**).
+An AI-powered meeting note taker that is fully local. Like Granola, the AI does not join a meeting but instead records the microphone and system audio in the background, transcribes them and then summarises into notes. All processing is done locally using open-source models (**no audio or text ever leaves the laptop**).
 
 ## Installation
 
@@ -27,29 +27,28 @@ npm run build:native   # compiles the two Swift helpers into resources/bin/
 npm run dev            # builds and launches the app
 ```
 
-On first use:
+## Recording your first call
 
-- macOS will prompt for **Microphone** access.
-- System audio does **not** prompt — you must grant it manually, once: attempt a recording (this registers the app with macOS, but the capture will fail), then enable the app under **System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only**, and record again. (In dev, the permission may already be satisfied without any new entry appearing: helpers are attributed up the process chain, so if your terminal already has the broader Screen Recording permission — which includes system audio — recording just works.)
-- The transcription model (parakeet v2, ~450 MB) auto-downloads to `data/models/` on the first transcription.
-
-Everything the app produces — database, recordings, models, config — lives in the gitignored `./data/` folder.
-
-## Recording a call
-
-1. Join your meeting in any app (Zoom, Meet, Teams, a phone call routed through the Mac — anything that plays audio).
-2. Click **New note**. The note opens instantly and shows "Starting audio capture…" for the second or two the audio hardware takes to spin up; once live, your microphone is captured as "Me", everything the system plays as "Them".
+1. Join your meeting in any app (Zoom, Meet, Teams, a phone call routed through the Mac)
+2. Click **New note**. The note opens instantly and shows "Starting audio capture…" for the second or two the audio hardware takes to spin up;
 3. Type your own notes during the call if you like; they autosave as you go.
-4. Click **Stop** when the meeting ends. Transcription and summarisation run automatically. This usually takes a couple of minutes for an hour-long call.
-5. Click the title to rename the note. If a step fails (e.g. Ollama isn't running), the note shows a Retry button that resumes from where it got to.
+4. Click **Stop** when the meeting ends. Transcription and summarisation run automatically. This usually takes a couple of minutes for an hour-long call. Note, it will take a few minutes to download the transcription model the first time (parakeet v2, ~450 MB).
+5. Edit the generated notes. Edit the title. If a step fails (e.g. Ollama isn't running), the note shows a Retry button that resumes from where it got to.
 
 > **Caution:** there is no pause. The stop button ends the recording for good and transcription and summarisation will start immediately.
+
+#### Permissions
+
+- macOS will prompt for **Microphone** access on first use.
+- System audio does **not** prompt — you must grant it manually, once: attempt a recording (this registers the app with macOS, but the capture will fail), then enable the app under **System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only**, and record again. (In dev, the permission may already be satisfied without any new entry appearing: helpers are attributed up the process chain, so if your terminal already has the broader Screen Recording permission — which includes system audio — recording just works.)
+
+Everything the app produces (database, recordings, models, config) lives in the gitignored `./data/` folder.
 
 ## Features
 
 ### Start a new note
 
-The 'New note' button starts a new note and automatically begins recording. Nothing is visible to other participants so make sure to inform them.
+The 'New note' button starts a note and automatically begins recording. Nothing is visible to other participants so make sure to inform them.
 
 ![Image](/assets/home.png)
 
@@ -77,15 +76,13 @@ Asking questions across all your meetings is planned but not built yet; the tab 
 
 ![Image](/assets/how-it-works.png)
 
-It's an Electron app, and a Node main process that owns all I/O. It spawns two small Swift helpers, ffmpeg, and talking to Ollama over HTTP.
+This is written as an Electron app with a Node main process that owns all I/O. It spawns two small Swift helpers, ffmpeg, and talking to Ollama over HTTP.
 
-Recording writes two WAV files to disk; when you hit 'Stop', a batch pipeline transcribes each stream, merges them into one speaker-labelled timeline, stores it in SQLite, and asks the LLM for a summary.
-
-There is no live streaming transcription but at ~280× realtime, batch transcription finishes in seconds, and the pipeline stays drastically simpler. WAVs are kept forever (~330 MB/hour); they make every pipeline step re-runnable from disk.
+Recording writes two WAV files to disk; when you hit 'Stop', a batch pipeline transcribes each stream, merges them into one speaker-labelled timeline, stores it in SQLite, and asks the LLM for a summary. WAVs are kept forever (~330 MB/hour); they make every pipeline step re-runnable from disk.
 
 ### Key technical decisions
 
-**Two audio streams instead of diarization.** The mic and system audio are recorded as separate WAVs. Speaker attribution then comes free from the hardware path — mic = "Me", system = "Them" — instead of from a diarization model. The trade-off: all other participants collapse into one "Them". The two streams are aligned at merge time using wall-clock epoch anchors captured at record start.
+**Two audio streams instead of diarization.** The mic and system audio are recorded as separate WAVs. Speaker attribution then comes free from the hardware path i.e. mic = "Me", system = "Them". The trade-off is all other participants are collapsed into "Them". The two streams are aligned at merge time using wall-clock epoch anchors captured at record start.
 
 **How the audio is recorded.** A single Swift helper captures both streams. The mic comes from `AVAudioEngine`; system audio comes from a **CoreAudio process tap** (`CATapDescription` on an aggregate device, macOS 14.2+) rather than ScreenCaptureKit. SCK counts as _screen recording_ — macOS shows the purple "your screen is being recorded" indicator — while the process tap delivers the same PCM under the milder "System Audio Recording Only" permission with no indicator. This is also why the app doesn't use Electron/Chromium's built-in loopback capture: it's lossy (Opus) and its mic and system clocks are unsynchronised, which is fatal when merging two streams into one timeline.
 
