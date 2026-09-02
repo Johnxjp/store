@@ -2,6 +2,8 @@
 
 An AI-powered meeting note taker that is fully local. Like Granola, the AI does not join a meeting but instead records the microphone and system audio in the background, transcribes them and then summarises into notes. All processing is done locally using open-source models (**no audio or text ever leaves the laptop**).
 
+![Image](/assets/home.png)
+
 ## Installation
 
 Requirements:
