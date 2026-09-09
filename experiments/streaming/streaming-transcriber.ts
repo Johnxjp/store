@@ -11,6 +11,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { findCutByte, peakDb, wrapWav } from '../../src/main/chunker'
 import { resolveBin, SILENCE_MAX_DB } from '../../src/main/transcribe'
 import type { StreamSegment } from '../../src/main/merge'
 
@@ -98,7 +99,7 @@ export class StreamingTranscriber {
   }
 
   private findCutByte(buffered: Buffer): number {
-    return findCutByte(buffered, this.chunkSeconds, this.cutSearchSeconds)
+    return findCutByte(buffered, this.chunkSeconds, this.cutSearchSeconds, BYTES_PER_SECOND)
   }
 
   private emitChunk(pcm: Buffer): void {
@@ -120,7 +121,7 @@ export class StreamingTranscriber {
       return
     }
     const wavPath = join(this.options.workDir, `chunk-${String(index).padStart(3, '0')}.wav`)
-    await writeFile(wavPath, wrapWav(pcm))
+    await writeFile(wavPath, wrapWav(pcm, SAMPLE_RATE))
     const args = [
       '-m',
       this.options.modelPath,
@@ -153,62 +154,4 @@ export class StreamingTranscriber {
     this.chunks.push({ index, startMs, endMs, skippedAsSilent: false, segments })
     this.options.onChunk?.({ index, startMs, endMs, text })
   }
-}
-
-/**
- * Quietest 200 ms frame in the last cutSearchSeconds of the target window, so
- * the cut lands in a pause rather than mid-word. Returns the byte offset of
- * that frame's midpoint (aligned to a sample boundary).
- */
-export function findCutByte(
-  buffered: Buffer,
-  chunkSeconds: number,
-  cutSearchSeconds: number
-): number {
-  const windowEnd = chunkSeconds * BYTES_PER_SECOND
-  const searchStart = windowEnd - cutSearchSeconds * BYTES_PER_SECOND
-  const frameBytes = 0.2 * BYTES_PER_SECOND
-  let bestStart = windowEnd - frameBytes
-  let bestEnergy = Infinity
-  for (let start = searchStart; start + frameBytes <= windowEnd; start += frameBytes) {
-    let energy = 0
-    for (let i = start; i < start + frameBytes; i += BYTES_PER_SAMPLE) {
-      const sample = buffered.readInt16LE(i)
-      energy += sample * sample
-    }
-    if (energy < bestEnergy) {
-      bestEnergy = energy
-      bestStart = start
-    }
-  }
-  return bestStart + frameBytes / 2
-}
-
-export function peakDb(pcm: Buffer): number {
-  let peak = 0
-  for (let i = 0; i + BYTES_PER_SAMPLE <= pcm.length; i += BYTES_PER_SAMPLE) {
-    const sample = Math.abs(pcm.readInt16LE(i))
-    if (sample > peak) peak = sample
-  }
-  if (peak === 0) return -Infinity
-  return 20 * Math.log10(peak / 32768)
-}
-
-/** Minimal 44-byte PCM WAV header around raw s16le 16 kHz mono samples. */
-export function wrapWav(pcm: Buffer): Buffer {
-  const header = Buffer.alloc(44)
-  header.write('RIFF', 0)
-  header.writeUInt32LE(36 + pcm.length, 4)
-  header.write('WAVE', 8)
-  header.write('fmt ', 12)
-  header.writeUInt32LE(16, 16)
-  header.writeUInt16LE(1, 20)
-  header.writeUInt16LE(1, 22)
-  header.writeUInt32LE(SAMPLE_RATE, 24)
-  header.writeUInt32LE(BYTES_PER_SECOND, 28)
-  header.writeUInt16LE(BYTES_PER_SAMPLE, 32)
-  header.writeUInt16LE(16, 34)
-  header.write('data', 36)
-  header.writeUInt32LE(pcm.length, 40)
-  return Buffer.concat([header, pcm])
 }
