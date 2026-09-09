@@ -18,6 +18,12 @@ export interface PipelineOptions {
   onSummaryDelta?: (text: string) => void
   /** Live-transcription hand-off (see live.ts): per-stream segments, or null when the live path was invalidated. */
   liveResult?: Promise<{ mic: StreamSegment[]; system: StreamSegment[] } | null>
+  /**
+   * Title pinned at recording start (see warm.ts wiring in ipc.ts). Keeps the
+   * final prompt byte-identical to every warm request regardless of
+   * mid-meeting renames — the in-prompt title is only an LLM context hint.
+   */
+  promptTitle?: string
 }
 
 export interface SessionAnchors {
@@ -143,7 +149,7 @@ export async function runPipeline(
       generateNotes(
         buildSummaryPrompt(
           {
-            title: meeting.title,
+            title: options.promptTitle ?? meeting.title,
             dateLabel: new Date(meeting.createdAt).toLocaleString(),
             transcript: segments
           },

@@ -7,10 +7,18 @@ import { IPC } from '../shared/ipc-channels'
 import type { Meeting, MeetingDetail, PipelineStage } from '../shared/types'
 import { readConfig } from './config'
 import * as db from './db'
-import { LiveTranscriber } from './live'
+import { buildSummaryPrompt, type ChatPrompt } from './enhance'
+import { LiveTranscriber, type LiveSegments } from './live'
+import { formatTranscript, mergeTranscripts } from './merge'
 import { audioCaptureBin, recordingsDir } from './paths'
-import { runPipeline, writeSessionFile, type PipelineOptions } from './pipeline'
+import {
+  runPipeline,
+  writeSessionFile,
+  type PipelineOptions,
+  type SessionAnchors
+} from './pipeline'
 import { Recorder } from './recorder'
+import { SummaryWarmer } from './warm'
 
 interface Session {
   recorder: Recorder
@@ -19,6 +27,10 @@ interface Session {
   starting: Promise<boolean>
   /** Transcribes during the meeting; null until capture is live (or when disabled by config). */
   live: LiveTranscriber | null
+  /** Keeps Ollama's prefix cache warm as the live transcript grows. */
+  warmer: SummaryWarmer | null
+  /** Title at recording start; every warm and the final summary prompt use it (renames would void the cache). */
+  promptTitle: string | null
 }
 
 let session: Session | null = null
@@ -31,8 +43,9 @@ let session: Session | null = null
  */
 export function abortActiveRecording(): Promise<void> | null {
   if (!session) return null
-  const { recorder, meetingId, live } = session
+  const { recorder, meetingId, live, warmer } = session
   session = null
+  warmer?.stop()
   live?.cancel()
   return recorder
     .stop()
@@ -80,8 +93,20 @@ export function registerIpcHandlers(): void {
         // A fast Stop (or quit) during capture spin-up already tore the
         // session down — starting the live loop then would leak it.
         if (session?.meetingId === id && readConfig().liveTranscription) {
-          session.live = new LiveTranscriber(dir)
-          session.live.start()
+          const sess = session
+          const promptTitle = db.getMeeting(id)?.title ?? meeting.title
+          const live = new LiveTranscriber(dir, {
+            onChunk: () => sess.warmer?.poke()
+          })
+          sess.live = live
+          sess.warmer = new SummaryWarmer(() =>
+            buildWarmPrompt(live.snapshot(), anchors, promptTitle, meeting.createdAt)
+          )
+          sess.promptTitle = promptTitle
+          live.start()
+          // Warm immediately: loads the model and prefills the static
+          // instruction prefix before the first chunk even lands.
+          sess.warmer.poke()
         }
         if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, id)
         return true
@@ -93,7 +118,7 @@ export function registerIpcHandlers(): void {
         return false
       }
     )
-    session = { recorder, meetingId: id, starting, live: null }
+    session = { recorder, meetingId: id, starting, live: null, warmer: null, promptTitle: null }
     return meeting
   })
 
@@ -105,7 +130,10 @@ export function registerIpcHandlers(): void {
     // Capture may still be spinning up; wait for it to go live (or fail)
     // before stopping. On failure the meeting is already marked 'error'.
     if (await active.starting) {
-      const { live } = active
+      const { live, warmer } = active
+      // Stop warming first: an unaborted warm would queue the final summary
+      // request behind it on Ollama's single runner.
+      warmer?.stop()
       try {
         await active.recorder.stop()
       } catch (err) {
@@ -118,7 +146,8 @@ export function registerIpcHandlers(): void {
       // 'recording' while the tail chunks transcribe. The pipeline awaits it
       // inside its transcribing stage instead.
       void runPipelineNotifying(active.meetingId, event.sender, {
-        liveResult: live?.finish()
+        liveResult: live?.finish(),
+        promptTitle: active.promptTitle ?? undefined
       }).catch(() => {})
     }
     return db.getMeeting(active.meetingId)!
@@ -161,6 +190,30 @@ export function registerIpcHandlers(): void {
       await rm(meeting.audioDir, { recursive: true, force: true })
     }
   })
+}
+
+/**
+ * The warmer's prompt builder: merge the live segments with the session
+ * anchors and build the production prompt byte-identically to the pipeline's
+ * summarize stage. Returns null once the transcript exceeds the truncation
+ * cap — truncation rewrites the prompt middle, which defeats the cache.
+ */
+function buildWarmPrompt(
+  segments: LiveSegments,
+  anchors: SessionAnchors,
+  title: string,
+  createdAt: number
+): ChatPrompt | null {
+  const merged = mergeTranscripts(
+    { segments: segments.mic, epochMs: anchors.micEpochMs },
+    { segments: segments.system, epochMs: anchors.systemEpochMs }
+  )
+  const config = readConfig()
+  if (formatTranscript(merged).length > config.maxTranscriptChars) return null
+  return buildSummaryPrompt(
+    { title, dateLabel: new Date(createdAt).toLocaleString(), transcript: merged },
+    config.maxTranscriptChars
+  )
 }
 
 async function runPipelineNotifying(
