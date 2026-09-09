@@ -15,6 +15,7 @@ interface WarmerDeps {
 
 export class SummaryWarmer {
   private inFlight = false
+  private running: Promise<void> | null = null
   private dirty = false
   private failures = 0
   private disabled = false
@@ -40,7 +41,14 @@ export class SummaryWarmer {
       this.dirty = true
       return
     }
-    void this.run()
+    this.running = this.run().finally(() => {
+      this.running = null
+    })
+  }
+
+  /** Resolves when no warm is in flight (replay-harness pacing hook, like LiveTranscriber.idle). */
+  async idle(): Promise<void> {
+    while (this.running) await this.running
   }
 
   /** Aborts any in-flight warm and blocks future pokes (call before the real summary request). */

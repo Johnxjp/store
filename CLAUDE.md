@@ -13,6 +13,7 @@ A local-only Granola clone for macOS: records meetings (system audio + microphon
 | Rebuild Swift helpers  | `npm run build:native`                                     |
 | Headless pipeline test | `npx tsx scripts/test-pipeline.ts <recording-dir>`         |
 | Headless summary test  | `npx tsx scripts/test-enhance.ts [model]`                  |
+| Live-path replay test  | `npx tsx scripts/test-live-pipeline.ts <recording-dir> [--warm] [--summarize]` |
 
 ## Architecture
 
@@ -33,7 +34,7 @@ Renderer (React, pure UI) ←window.api (preload)→ Main (Node, all I/O)
 
 ### The pipeline (stop → notes)
 
-Two WAVs → ffmpeg to 16 kHz mono → fluid-transcribe (word-timing JSON, per stream) → sentence assembly (`wordsToSegments`) → merge → SQLite → Ollama summary. The merge (`src/main/merge.ts`, the most-tested code here) aligns the two streams via wall-clock epoch anchors captured at record start, labels mic segments "Me" and system segments "Them", filters ASR hallucinations, and coalesces same-speaker runs.
+Two WAVs → ffmpeg to 16 kHz mono → fluid-transcribe (word-timing JSON, per stream) → sentence assembly (`wordsToSegments`) → merge → SQLite → Ollama summary. With live transcription on (`liveTranscription` config, default true), most of this happens *during* the meeting: `live.ts` tail-reads the growing WAVs in ~30s chunks and `warm.ts` prefills Ollama's prefix cache after each chunk, so at Stop only the tail chunk transcribes, the pipeline skips convert+transcribe, and the summary's prefill is nearly free (measured ~80ms-1.4s vs 60-186s cold). Any live failure falls back to this batch path. The merge (`src/main/merge.ts`, the most-tested code here) aligns the two streams via wall-clock epoch anchors captured at record start, labels mic segments "Me" and system segments "Them", filters ASR hallucinations, and coalesces same-speaker runs.
 
 ## Key decisions (and why)
 

@@ -20,3 +20,4 @@ experiments/prompt_optimisation/*_notes.md
 experiments/prompt_optimisation/outputs/
 experiments/results/streaming/
 experiments/results/parakeet-summary-*/
+experiments/results/live-pipeline-*/

@@ -89,6 +89,15 @@ export class LiveTranscriber {
     }
   }
 
+  /**
+   * Resolves when all currently queued chunk work is done. The replay
+   * harness awaits this between ticks so transcription keeps pace with the
+   * simulated meeting, as it does against a real-time one.
+   */
+  async idle(): Promise<void> {
+    await Promise.all(this.streams.map((s) => s.queue))
+  }
+
   /** The segments transcribed so far (for the cache warmer). */
   snapshot(): LiveSegments {
     const byName = (name: StreamName): StreamSegment[] =>
