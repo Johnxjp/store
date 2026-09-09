@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as db from '../src/main/db'
 import { runPipeline } from '../src/main/pipeline'
 import { generateNotes } from '../src/main/enhance'
-import { transcribeWav } from '../src/main/transcribe'
+import { convertTo16k, transcribeWav } from '../src/main/transcribe'
 
 vi.mock('../src/main/transcribe', () => ({
   convertTo16k: vi.fn(async () => {}),
@@ -136,6 +136,32 @@ describe('runPipeline', () => {
 
     await expect(runPipeline('m1', () => {})).rejects.toThrow('<summary>')
     expect(db.getMeeting('m1')?.status).toBe('error')
+  })
+
+  it('uses live segments when liveResult resolves them, skipping convert and transcribe', async () => {
+    await createMeetingWithAudioDir('m1')
+
+    await runPipeline('m1', () => {}, {
+      liveResult: Promise.resolve({
+        mic: [{ fromMs: 0, toMs: 1000, text: 'we shipped the release live' }],
+        system: []
+      })
+    })
+
+    expect(convertTo16k).not.toHaveBeenCalled()
+    expect(transcribeWav).not.toHaveBeenCalled()
+    expect(db.getTranscript('m1').length).toBeGreaterThan(0)
+    expect(db.getMeeting('m1')).toMatchObject({ status: 'ready', enhancedNotes: '## Notes' })
+  })
+
+  it('falls back to batch transcription when liveResult resolves null', async () => {
+    await createMeetingWithAudioDir('m1')
+
+    await runPipeline('m1', () => {}, { liveResult: Promise.resolve(null) })
+
+    expect(transcribeWav).toHaveBeenCalledTimes(2)
+    expect(db.getTranscript('m1').length).toBeGreaterThan(0)
+    expect(db.getMeeting('m1')).toMatchObject({ status: 'ready', enhancedNotes: '## Notes' })
   })
 
   it('marks the meeting error when transcription cannot start', async () => {

@@ -20,6 +20,11 @@ export interface Config {
    * per token. E.g. 32768 → (32768 - 5000) × 4 ≈ 110000.
    */
   maxTranscriptChars: number
+  /**
+   * Kill switch for during-meeting (live) transcription. Set false in
+   * data/config.json to always use the post-meeting batch pipeline.
+   */
+  liveTranscription: boolean
 }
 
 // Fallbacks for a missing/corrupt config.json only — the real values live in
@@ -28,7 +33,8 @@ const DEFAULTS: Config = {
   ollamaModel: 'llama3.2',
   ollamaUrl: 'http://localhost:11434',
   numCtx: 32_768,
-  maxTranscriptChars: 110_000
+  maxTranscriptChars: 110_000,
+  liveTranscription: true
 }
 
 const configPath = join(dataDir, 'config.json')

@@ -5,9 +5,11 @@ import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IPC } from '../shared/ipc-channels'
 import type { Meeting, MeetingDetail, PipelineStage } from '../shared/types'
+import { readConfig } from './config'
 import * as db from './db'
+import { LiveTranscriber } from './live'
 import { audioCaptureBin, recordingsDir } from './paths'
-import { runPipeline, writeSessionFile } from './pipeline'
+import { runPipeline, writeSessionFile, type PipelineOptions } from './pipeline'
 import { Recorder } from './recorder'
 
 interface Session {
@@ -15,6 +17,8 @@ interface Session {
   meetingId: string
   /** Resolves true once capture is live (anchors written), false if it failed to start. */
   starting: Promise<boolean>
+  /** Transcribes during the meeting; null until capture is live (or when disabled by config). */
+  live: LiveTranscriber | null
 }
 
 let session: Session | null = null
@@ -27,8 +31,9 @@ let session: Session | null = null
  */
 export function abortActiveRecording(): Promise<void> | null {
   if (!session) return null
-  const { recorder, meetingId } = session
+  const { recorder, meetingId, live } = session
   session = null
+  live?.cancel()
   return recorder
     .stop()
     .catch(() => {})
@@ -72,6 +77,12 @@ export function registerIpcHandlers(): void {
       async (anchors) => {
         await writeSessionFile(dir, anchors)
         db.setRecordingStarted(id, Math.min(anchors.micEpochMs, anchors.systemEpochMs))
+        // A fast Stop (or quit) during capture spin-up already tore the
+        // session down — starting the live loop then would leak it.
+        if (session?.meetingId === id && readConfig().liveTranscription) {
+          session.live = new LiveTranscriber(dir)
+          session.live.start()
+        }
         if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, id)
         return true
       },
@@ -82,25 +93,35 @@ export function registerIpcHandlers(): void {
         return false
       }
     )
-    session = { recorder, meetingId: id, starting }
+    session = { recorder, meetingId: id, starting, live: null }
     return meeting
   })
 
   ipcMain.handle(IPC.recordingStop, async (event): Promise<Meeting> => {
     if (!session) throw new Error('not recording')
-    const { recorder, meetingId, starting } = session
+    const active = session
     session = null
 
     // Capture may still be spinning up; wait for it to go live (or fail)
     // before stopping. On failure the meeting is already marked 'error'.
-    if (await starting) {
-      await recorder.stop()
-      db.setRecordingEnded(meetingId, Date.now())
+    if (await active.starting) {
+      const { live } = active
+      try {
+        await active.recorder.stop()
+      } catch (err) {
+        live?.cancel()
+        throw err
+      }
+      db.setRecordingEnded(active.meetingId, Date.now())
 
-      // Pipeline runs in the background; the renderer follows progress events.
-      void runPipelineNotifying(meetingId, event.sender).catch(() => {})
+      // finish() is not awaited here — that would hold the meeting in
+      // 'recording' while the tail chunks transcribe. The pipeline awaits it
+      // inside its transcribing stage instead.
+      void runPipelineNotifying(active.meetingId, event.sender, {
+        liveResult: live?.finish()
+      }).catch(() => {})
     }
-    return db.getMeeting(meetingId)!
+    return db.getMeeting(active.meetingId)!
   })
 
   ipcMain.handle(IPC.pipelineRetry, async (event, meetingId: string): Promise<void> => {
@@ -142,7 +163,11 @@ export function registerIpcHandlers(): void {
   })
 }
 
-async function runPipelineNotifying(meetingId: string, sender: WebContents): Promise<void> {
+async function runPipelineNotifying(
+  meetingId: string,
+  sender: WebContents,
+  options: PipelineOptions = {}
+): Promise<void> {
   const notifyUpdated = () => {
     if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, meetingId)
   }
@@ -160,7 +185,7 @@ async function runPipelineNotifying(meetingId: string, sender: WebContents): Pro
     if (!sender.isDestroyed()) sender.send(IPC.pipelineSummaryDelta, { meetingId, text })
   }
   try {
-    await runPipeline(meetingId, progress, { onSummaryDelta })
+    await runPipeline(meetingId, progress, { ...options, onSummaryDelta })
   } finally {
     notifyUpdated()
   }

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { StreamSegment } from './merge'
 import { asrModelsDir, fluidTranscribeBin } from './paths'
@@ -74,7 +74,9 @@ export async function convertTo16k(srcWav: string, destWav: string, gainDb = 0):
  */
 export async function transcribeWav(wav16kPath: string): Promise<StreamSegment[]> {
   const outJson = wav16kPath.replace(/\.wav$/, '.json')
-  await execFileAsync(fluidTranscribeBin, [asrModelsDir, wav16kPath, outJson])
+  const { stderr } = await execFileAsync(fluidTranscribeBin, [asrModelsDir, wav16kPath, outJson])
+  const timing = stderr.trim().split('\n').at(-1)
+  if (timing) console.log(`[transcribe] ${basename(wav16kPath)}: ${timing}`)
   const raw = await readFile(outJson, 'utf-8')
   return wordsToSegments(parseFluidJson(raw))
 }

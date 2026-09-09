@@ -25,7 +25,7 @@ Renderer (React, pure UI) ←window.api (preload)→ Main (Node, all I/O)
                                                    └─ node:sqlite → data/db.sqlite
 ```
 
-- `src/main/` — services: `recorder` (Swift helper lifecycle), `transcribe` (ffmpeg + fluid-transcribe), `chunker` (pure PCM chunking for live transcription), `merge` (pure timeline logic), `enhance` (prompt + Ollama), `pipeline` (orchestration + status), `db`, `config`, `paths`.
+- `src/main/` — services: `recorder` (Swift helper lifecycle), `transcribe` (ffmpeg + fluid-transcribe), `chunker` (pure PCM chunking for live transcription), `live` (during-meeting chunked transcription; any failure falls back to batch), `merge` (pure timeline logic), `enhance` (prompt + Ollama), `pipeline` (orchestration + status), `db`, `config`, `paths`.
 - `src/renderer/` — React UI. No Node access; everything goes through the typed `window.api` bridge in `src/preload/`.
 - `native/AudioCapture/` — Swift helper. Captures mic (AVAudioEngine) + system audio (CoreAudio process tap) into two WAVs. Speaks NDJSON on stdout; stops on `stop\n` via stdin or EOF.
 - `native/FluidTranscribe/` — Swift helper. Transcribes one WAV with parakeet v2 via FluidAudio CoreML, writes word-level timings as JSON, exits. Compiled against a pinned FluidAudio checkout auto-cloned into `native/vendor/FluidAudio` (gitignored) by `build-native.sh`.

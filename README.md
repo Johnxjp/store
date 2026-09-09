@@ -80,7 +80,7 @@ Asking questions across all your meetings is planned but not built yet; the tab 
 
 This is written as an Electron app with a Node main process that owns all I/O. It spawns two small Swift helpers, ffmpeg, and talking to Ollama over HTTP.
 
-Recording writes two WAV files to disk; when you hit 'Stop', a batch pipeline transcribes each stream, merges them into one speaker-labelled timeline, stores it in SQLite, and asks the LLM for a summary, which streams into the note as it is written. WAVs are kept forever (~330 MB/hour); they make every pipeline step re-runnable from disk.
+Recording writes two WAV files to disk and transcribes them as the meeting runs: a background loop tail-reads the growing WAVs, cuts ~30s chunks at the quietest instant, and transcribes each chunk, so at 'Stop' only the final seconds remain. The pipeline then merges the streams into one speaker-labelled timeline, stores it in SQLite, and asks the LLM for a summary, which streams into the note as it is written. If anything in the live path fails, the original batch pipeline re-transcribes everything from the WAVs on disk. WAVs are kept forever (~330 MB/hour); they make every pipeline step re-runnable from disk.
 
 ### Key technical decisions
 

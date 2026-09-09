@@ -80,22 +80,36 @@ export async function runPipeline(
       if (!dir) throw new Error(`meeting ${meetingId} has no recording`)
       const anchors = await readSessionFile(dir)
 
-      const mic16k = join(dir, 'mic-16k.wav')
-      const system16k = join(dir, 'system-16k.wav')
-      const [micAudible, systemAudible] = await timed('converting', () =>
-        Promise.all([
-          prepare16k(join(dir, 'mic.wav'), mic16k),
-          prepare16k(join(dir, 'system.wav'), system16k)
-        ])
-      )
+      // The live transcriber did (almost) all the work during the meeting;
+      // its finish() promise resolves once the tail chunks are done — or null
+      // when the live session was invalidated, which falls through to the
+      // batch path below.
+      const live = options.liveResult
+        ? await timed('transcribing', () => options.liveResult!)
+        : null
 
-      const emptyStream = Promise.resolve<StreamSegment[]>([])
-      const [micSegments, systemSegments] = await timed('transcribing', () =>
-        Promise.all([
-          micAudible ? transcribeWav(mic16k) : emptyStream,
-          systemAudible ? transcribeWav(system16k) : emptyStream
-        ])
-      )
+      let micSegments: StreamSegment[]
+      let systemSegments: StreamSegment[]
+      if (live) {
+        ;({ mic: micSegments, system: systemSegments } = live)
+      } else {
+        const mic16k = join(dir, 'mic-16k.wav')
+        const system16k = join(dir, 'system-16k.wav')
+        const [micAudible, systemAudible] = await timed('converting', () =>
+          Promise.all([
+            prepare16k(join(dir, 'mic.wav'), mic16k),
+            prepare16k(join(dir, 'system.wav'), system16k)
+          ])
+        )
+
+        const emptyStream = Promise.resolve<StreamSegment[]>([])
+        ;[micSegments, systemSegments] = await timed('transcribing', () =>
+          Promise.all([
+            micAudible ? transcribeWav(mic16k) : emptyStream,
+            systemAudible ? transcribeWav(system16k) : emptyStream
+          ])
+        )
+      }
 
       onProgress('merging')
       segments = mergeTranscripts(
