@@ -104,6 +104,30 @@ describe('runPipeline', () => {
     })
   })
 
+  it('streams stripped, throttled, cumulative summary text to onSummaryDelta', async () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    vi.mocked(generateNotes).mockImplementationOnce(async (_prompt, _config, onToken) => {
+      onToken?.('<sum')
+      onToken?.('<summary>## Notes')
+      onToken?.('<summary>## Notes lin')
+      await sleep(120)
+      onToken?.('<summary>## Notes</summ')
+      onToken?.('<summary>## Notes\n- a</summary>')
+      return '<summary>## Notes\n- a</summary>'
+    })
+    await createMeetingWithAudioDir('m1')
+    db.setRecordingStarted('m1', 1000)
+    db.setRecordingEnded('m1', 1000 + 30_000)
+
+    const deltas: string[] = []
+    await runPipeline('m1', () => {}, { onSummaryDelta: (text) => deltas.push(text) })
+
+    // '<sum' has no visible text; '## Notes lin' lands inside the 100ms
+    // throttle window; the partial closing tag strips back to unchanged text.
+    expect(deltas).toEqual(['## Notes', '## Notes\n- a'])
+    expect(db.getMeeting('m1')).toMatchObject({ status: 'ready', enhancedNotes: '## Notes\n- a' })
+  })
+
   it('marks the meeting error when the model response has no summary tags', async () => {
     vi.mocked(generateNotes).mockResolvedValueOnce('## Notes with no tags')
     await createMeetingWithAudioDir('m1')

@@ -87,17 +87,26 @@ export function truncateMiddle(text: string, maxChars: number): string {
   return `${text.slice(0, half)}\n\n[... transcript truncated ...]\n\n${text.slice(-half)}`
 }
 
-interface OllamaChatResponse {
+interface OllamaChatChunk {
   message?: { content?: string }
+  done?: boolean
+  prompt_eval_count?: number
+  prompt_eval_duration?: number
+  eval_count?: number
+  eval_duration?: number
 }
 
-export async function generateNotes(prompt: ChatPrompt, config: Config): Promise<string> {
+export async function generateNotes(
+  prompt: ChatPrompt,
+  config: Config,
+  onToken?: (cumulativeText: string) => void
+): Promise<string> {
   const res = await fetch(`${config.ollamaUrl}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: config.ollamaModel,
-      stream: false,
+      stream: onToken !== undefined,
       options: { temperature: 0, num_ctx: config.numCtx },
       messages: [
         { role: 'system', content: prompt.system },
@@ -110,9 +119,49 @@ export async function generateNotes(prompt: ChatPrompt, config: Config): Promise
   if (!res.ok) {
     throw new Error(`Ollama error ${res.status}: ${await res.text()}`)
   }
-  const data = (await res.json()) as OllamaChatResponse
-  const content = data.message?.content?.trim()
-  if (!content) throw new Error('Ollama returned an empty response')
+  const content =
+    onToken && res.body
+      ? await readChatStream(res.body, onToken)
+      : ((await res.json()) as OllamaChatChunk).message?.content
+  const trimmed = content?.trim()
+  if (!trimmed) throw new Error('Ollama returned an empty response')
+  return trimmed
+}
+
+async function readChatStream(
+  body: ReadableStream<Uint8Array>,
+  onToken: (cumulativeText: string) => void
+): Promise<string> {
+  let content = ''
+  const handleLine = (line: string) => {
+    if (!line.trim()) return
+    const chunk = JSON.parse(line) as OllamaChatChunk
+    if (chunk.message?.content) {
+      content += chunk.message.content
+      onToken(content)
+    }
+    if (chunk.done) {
+      const secs = (ns?: number) => (ns === undefined ? '?' : (ns / 1e9).toFixed(1))
+      console.log(
+        `[enhance] prefill ${chunk.prompt_eval_count ?? '?'} tokens in ` +
+          `${secs(chunk.prompt_eval_duration)}s, decode ${chunk.eval_count ?? '?'} tokens in ` +
+          `${secs(chunk.eval_duration)}s`
+      )
+    }
+  }
+
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffered = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffered += decoder.decode(value, { stream: true })
+    const lines = buffered.split('\n')
+    buffered = lines.pop()!
+    lines.forEach(handleLine)
+  }
+  handleLine(buffered)
   return content
 }
 
@@ -121,4 +170,26 @@ export function extractSummary(raw: string): string {
   const match = raw.match(/<summary>([\s\S]*?)<\/summary>/i)
   if (!match) throw new Error('Ollama response did not contain <summary> tags')
   return match[1].trim()
+}
+
+const CLOSING_TAG = '</summary>'
+
+/**
+ * Streaming-tolerant counterpart to extractSummary: returns the notes text
+ * received so far, hiding the <summary> wrapper — including a closing tag
+ * that has only partially arrived — so tag fragments never reach the UI.
+ */
+export function extractPartialSummary(raw: string): string {
+  const open = raw.match(/<summary>/i)
+  if (open?.index === undefined) return ''
+  const inner = raw.slice(open.index + open[0].length)
+  const close = inner.match(/<\/summary>/i)
+  if (close?.index !== undefined) return inner.slice(0, close.index).trim()
+  const lower = inner.toLowerCase()
+  for (let len = CLOSING_TAG.length - 1; len >= 1; len--) {
+    if (lower.endsWith(CLOSING_TAG.slice(0, len))) {
+      return inner.slice(0, inner.length - len).trim()
+    }
+  }
+  return inner.trim()
 }

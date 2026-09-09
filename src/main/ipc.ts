@@ -143,14 +143,24 @@ export function registerIpcHandlers(): void {
 }
 
 async function runPipelineNotifying(meetingId: string, sender: WebContents): Promise<void> {
-  const progress = (stage: PipelineStage) => {
-    if (!sender.isDestroyed()) sender.send(IPC.pipelineProgress, { meetingId, stage })
-  }
   const notifyUpdated = () => {
     if (!sender.isDestroyed()) sender.send(IPC.meetingUpdated, meetingId)
   }
+  let summarizeAnnounced = false
+  const progress = (stage: PipelineStage) => {
+    // The transcript is already saved when summarizing starts; announcing the
+    // update first (IPC is ordered) lets the renderer show it mid-processing.
+    if (stage === 'summarizing' && !summarizeAnnounced) {
+      summarizeAnnounced = true
+      notifyUpdated()
+    }
+    if (!sender.isDestroyed()) sender.send(IPC.pipelineProgress, { meetingId, stage })
+  }
+  const onSummaryDelta = (text: string) => {
+    if (!sender.isDestroyed()) sender.send(IPC.pipelineSummaryDelta, { meetingId, text })
+  }
   try {
-    await runPipeline(meetingId, progress)
+    await runPipeline(meetingId, progress, { onSummaryDelta })
   } finally {
     notifyUpdated()
   }

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc-channels'
-import type { Meeting, MeetingDetail, PipelineProgress } from '../shared/types'
+import type { Meeting, MeetingDetail, PipelineProgress, SummaryDelta } from '../shared/types'
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: Electron.IpcRendererEvent, payload: T) => cb(payload)
@@ -25,6 +25,7 @@ const api = {
     ipcRenderer.invoke(IPC.meetingsSetSummary, id, summary),
   onPipelineProgress: (cb: (p: PipelineProgress) => void): (() => void) =>
     on(IPC.pipelineProgress, cb),
+  onSummaryDelta: (cb: (d: SummaryDelta) => void): (() => void) => on(IPC.pipelineSummaryDelta, cb),
   onMeetingUpdated: (cb: (meetingId: string) => void): (() => void) => on(IPC.meetingUpdated, cb)
 }
 

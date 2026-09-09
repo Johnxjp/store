@@ -29,6 +29,12 @@ export interface PipelineProgress {
   stage: PipelineStage
 }
 
+/** Cumulative summary text streamed while the summarize stage runs. */
+export interface SummaryDelta {
+  meetingId: string
+  text: string
+}
+
 export interface MeetingDetail {
   meeting: Meeting
   transcript: TranscriptSegment[]

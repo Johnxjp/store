@@ -11,6 +11,7 @@ interface Props {
   meetingId: string
   refreshKey: number
   stage?: PipelineStage
+  streamText?: string
   onStop: () => void
   onBack: () => void
   onDelete: () => void
@@ -22,6 +23,7 @@ export function MeetingDetailView({
   meetingId,
   refreshKey,
   stage,
+  streamText,
   onStop,
   onBack,
   onDelete,
@@ -237,7 +239,11 @@ export function MeetingDetailView({
                     >
                       <Markdown>{meeting.enhancedNotes}</Markdown>
                     </div>
-                  ) : (
+                  ) : streamText ? (
+                    <div className="notes">
+                      <Markdown>{streamText}</Markdown>
+                    </div>
+                  ) : meeting.status === 'processing' ? null : (
                     <p className="empty-state">No summary yet.</p>
                   )}
                 </section>

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { PipelineStage } from '../shared/types'
 import { readConfig } from './config'
 import * as db from './db'
-import { buildSummaryPrompt, extractSummary, generateNotes } from './enhance'
+import { buildSummaryPrompt, extractPartialSummary, extractSummary, generateNotes } from './enhance'
 import { mergeTranscripts, type StreamSegment } from './merge'
 import {
   boostGainDb,
@@ -12,6 +12,13 @@ import {
   measureMaxVolumeDb,
   transcribeWav
 } from './transcribe'
+
+export interface PipelineOptions {
+  /** Receives the cumulative summary text (tag-stripped, throttled) while it streams from Ollama. */
+  onSummaryDelta?: (text: string) => void
+  /** Live-transcription hand-off (see live.ts): per-stream segments, or null when the live path was invalidated. */
+  liveResult?: Promise<{ mic: StreamSegment[]; system: StreamSegment[] } | null>
+}
 
 export interface SessionAnchors {
   micEpochMs: number
@@ -49,7 +56,8 @@ async function prepare16k(srcWav: string, wav16k: string): Promise<boolean> {
  */
 export async function runPipeline(
   meetingId: string,
-  onProgress: (stage: PipelineStage) => void
+  onProgress: (stage: PipelineStage) => void,
+  options: PipelineOptions = {}
 ): Promise<void> {
   const meeting = db.getMeeting(meetingId)
   if (!meeting) throw new Error(`meeting ${meetingId} not found`)
@@ -127,7 +135,8 @@ export async function runPipeline(
           },
           config.maxTranscriptChars
         ),
-        config
+        config,
+        options.onSummaryDelta && throttledSummaryForwarder(options.onSummaryDelta)
       )
     )
     const notes = extractSummary(raw)
@@ -136,5 +145,18 @@ export async function runPipeline(
   } catch (err) {
     db.setMeetingStatus(meetingId, 'error', err instanceof Error ? err.message : String(err))
     throw err
+  }
+}
+
+/** Forwards tag-stripped cumulative summary text: at most every 100ms, and only when it changed. */
+function throttledSummaryForwarder(send: (text: string) => void): (raw: string) => void {
+  let lastText = ''
+  let lastSentAt = 0
+  return (raw) => {
+    const text = extractPartialSummary(raw)
+    if (text === lastText || Date.now() - lastSentAt < 100) return
+    lastText = text
+    lastSentAt = Date.now()
+    send(text)
   }
 }

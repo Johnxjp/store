@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildSummaryPrompt, extractSummary, truncateMiddle } from '../src/main/enhance'
+import {
+  buildSummaryPrompt,
+  extractPartialSummary,
+  extractSummary,
+  truncateMiddle
+} from '../src/main/enhance'
 import type { TranscriptSegment } from '../src/shared/types'
 
 const transcript: TranscriptSegment[] = [
@@ -86,5 +91,38 @@ describe('truncateMiddle', () => {
     expect(out.startsWith('AAA')).toBe(true)
     expect(out.endsWith('BBB')).toBe(true)
     expect(out).toContain('[... transcript truncated ...]')
+  })
+})
+
+describe('extractPartialSummary', () => {
+  it('returns empty until the opening tag has fully arrived', () => {
+    expect(extractPartialSummary('')).toBe('')
+    expect(extractPartialSummary('<sum')).toBe('')
+    expect(extractPartialSummary('<summary')).toBe('')
+  })
+
+  it('returns the text after a complete opening tag', () => {
+    expect(extractPartialSummary('<summary>## Notes\n- a point')).toBe('## Notes\n- a point')
+  })
+
+  it('hides a partially arrived closing tag at every fragment length', () => {
+    const closing = '</summary>'
+    for (let len = 1; len < closing.length; len++) {
+      const raw = `<summary>## Notes${closing.slice(0, len)}`
+      expect(extractPartialSummary(raw)).toBe('## Notes')
+    }
+  })
+
+  it('keeps a trailing < sequence that is not a closing-tag prefix', () => {
+    expect(extractPartialSummary('<summary>a </x')).toBe('a </x')
+  })
+
+  it('cuts at a complete closing tag and ignores trailing junk', () => {
+    expect(extractPartialSummary('<summary>## Notes</summary> trailing junk')).toBe('## Notes')
+  })
+
+  it('returns empty for empty inner content', () => {
+    expect(extractPartialSummary('<summary></summary>')).toBe('')
+    expect(extractPartialSummary('<summary>')).toBe('')
   })
 })

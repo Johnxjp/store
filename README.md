@@ -60,7 +60,7 @@ Every note has a free-form notepad you can type into while recording. Notes auto
 
 ### Automatic summary, editable in place
 
-When you stop, the app writes structured meeting notes: an overview of what the meeting was about, topic sections with the concrete facts and numbers that were said, and next steps with owners. Click anywhere in the summary to edit it directly.
+When you stop, the app writes structured meeting notes: an overview of what the meeting was about, topic sections with the concrete facts and numbers that were said, and next steps with owners. The notes stream into the page as the model writes them. Click anywhere in the summary to edit it directly.
 
 ![Image](/assets/summary.png)
 
@@ -80,7 +80,7 @@ Asking questions across all your meetings is planned but not built yet; the tab 
 
 This is written as an Electron app with a Node main process that owns all I/O. It spawns two small Swift helpers, ffmpeg, and talking to Ollama over HTTP.
 
-Recording writes two WAV files to disk; when you hit 'Stop', a batch pipeline transcribes each stream, merges them into one speaker-labelled timeline, stores it in SQLite, and asks the LLM for a summary. WAVs are kept forever (~330 MB/hour); they make every pipeline step re-runnable from disk.
+Recording writes two WAV files to disk; when you hit 'Stop', a batch pipeline transcribes each stream, merges them into one speaker-labelled timeline, stores it in SQLite, and asks the LLM for a summary, which streams into the note as it is written. WAVs are kept forever (~330 MB/hour); they make every pipeline step re-runnable from disk.
 
 ### Key technical decisions
 

@@ -12,6 +12,7 @@ export default function App() {
   const [nav, setNav] = useState<Nav>('home')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [progress, setProgress] = useState<Record<string, PipelineStage>>({})
+  const [summaryStream, setSummaryStream] = useState<Record<string, string>>({})
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -26,12 +27,28 @@ export default function App() {
     const offProgress = window.api.onPipelineProgress((p) => {
       setProgress((prev) => ({ ...prev, [p.meetingId]: p.stage }))
     })
-    const offUpdated = window.api.onMeetingUpdated(() => {
-      setProgress({})
-      void refresh()
+    const offSummary = window.api.onSummaryDelta((d) => {
+      setSummaryStream((prev) => ({ ...prev, [d.meetingId]: d.text }))
+    })
+    const offUpdated = window.api.onMeetingUpdated((meetingId) => {
+      setProgress((prev) => {
+        const next = { ...prev }
+        delete next[meetingId]
+        return next
+      })
+      // The stream entry outlives the refresh so the summary never flashes
+      // back to "No summary yet." between the DB write landing and the refetch.
+      void refresh().then(() => {
+        setSummaryStream((prev) => {
+          const next = { ...prev }
+          delete next[meetingId]
+          return next
+        })
+      })
     })
     return () => {
       offProgress()
+      offSummary()
       offUpdated()
     }
   }, [refresh])
@@ -90,6 +107,7 @@ export default function App() {
           meetingId={selectedId}
           refreshKey={refreshKey}
           stage={progress[selectedId]}
+          streamText={summaryStream[selectedId]}
           onStop={stopRecording}
           onBack={() => setSelectedId(null)}
           onDelete={() => deleteMeeting(selectedId)}

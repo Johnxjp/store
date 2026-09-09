@@ -2,6 +2,7 @@ export const IPC = {
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
   pipelineProgress: 'pipeline:progress',
+  pipelineSummaryDelta: 'pipeline:summary-delta',
   pipelineRetry: 'pipeline:retry',
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
