@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:native
+      - run: npm run build
+
+  # Proves the Ollama integration end to end — prompt → /api/chat (streaming
+  # NDJSON) → <summary> extraction — against a real server with a small model.
+  # Linux runner: Ollama runs fine on CPU here and macOS minutes bill at 10×.
+  ollama-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The smoke script runs under tsx; the Electron binary is dead weight.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Manual tarball install, not install.sh — the script starts a systemd
+      # service running as the `ollama` user, which puts the model store in
+      # /usr/share/ollama where actions/cache can't reach it.
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/download/ollama-linux-amd64.tgz | sudo tar zx -C /usr/local
+      - name: Cache model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-llama3.2
+      - name: Start Ollama and pull model
+        run: |
+          ollama serve &
+          for i in {1..30}; do
+            curl -sf http://localhost:11434/api/version && break
+            sleep 1
+          done
+          ollama pull llama3.2
+      - run: mkdir -p data
+      - run: npx tsx scripts/test-enhance.ts llama3.2
