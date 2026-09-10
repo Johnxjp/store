@@ -41,7 +41,9 @@ jobs:
       # service running as the `ollama` user, which puts the model store in
       # /usr/share/ollama where actions/cache can't reach it.
       - name: Install Ollama
-        run: curl -fsSL https://ollama.com/download/ollama-linux-amd64.tgz | sudo tar zx -C /usr/local
+        run: >
+          curl -fsSL https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+          | sudo tar --zstd -x -C /usr/local
       - name: Cache model
         uses: actions/cache@v4
         with:
