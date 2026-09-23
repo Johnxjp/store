@@ -25,7 +25,10 @@ const MIGRATIONS = [
      end_ms     INTEGER NOT NULL,
      text       TEXT NOT NULL
    );
-   CREATE INDEX idx_segments_meeting ON transcript_segments(meeting_id, start_ms);`
+   CREATE INDEX idx_segments_meeting ON transcript_segments(meeting_id, start_ms);`,
+  // Pause arrived after V2. Existing meetings were never pausable, so 0 is
+  // the correct value for every row already in the table.
+  `ALTER TABLE meetings ADD COLUMN paused_ms INTEGER NOT NULL DEFAULT 0;`
 ]
 
 let db: DatabaseSync
@@ -54,6 +57,7 @@ interface MeetingRow {
   enhanced_notes: string | null
   error_message: string | null
   audio_dir: string | null
+  paused_ms: number
 }
 
 function toMeeting(row: MeetingRow): Meeting {
@@ -67,7 +71,8 @@ function toMeeting(row: MeetingRow): Meeting {
     rawNotes: row.raw_notes,
     enhancedNotes: row.enhanced_notes,
     errorMessage: row.error_message,
-    audioDir: row.audio_dir
+    audioDir: row.audio_dir,
+    pausedMs: row.paused_ms
   }
 }
 
@@ -127,6 +132,10 @@ export function setMeetingStatus(id: string, status: MeetingStatus, errorMessage
     errorMessage ?? null,
     id
   )
+}
+
+export function setPausedMs(id: string, pausedMs: number): void {
+  db.prepare('UPDATE meetings SET paused_ms = ? WHERE id = ?').run(pausedMs, id)
 }
 
 export function setRecordingEnded(id: string, endedAt: number): void {

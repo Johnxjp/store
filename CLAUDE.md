@@ -4,16 +4,17 @@ A local-only Granola clone for macOS: records meetings (system audio + microphon
 
 ## Commands
 
-| Task                   | Command                                                    |
-| ---------------------- | ---------------------------------------------------------- |
-| Run the app (dev)      | `npm run dev` (watch mode: main-process edits hot-restart) |
-| Tests                  | `npm test` (Vitest — logic only: merge, prompts, db)       |
-| Typecheck              | `npm run typecheck`                                        |
-| Lint / format          | `npm run lint` / `npm run format`                          |
-| Rebuild Swift helpers  | `npm run build:native`                                     |
-| Headless pipeline test | `npx tsx scripts/test-pipeline.ts <recording-dir>`         |
-| Headless summary test  | `npx tsx scripts/test-enhance.ts [model]`                  |
+| Task                   | Command                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| Run the app (dev)      | `npm run dev` (watch mode: main-process edits hot-restart)                     |
+| Tests                  | `npm test` (Vitest — logic only: merge, prompts, db)                           |
+| Typecheck              | `npm run typecheck`                                                            |
+| Lint / format          | `npm run lint` / `npm run format`                                              |
+| Rebuild Swift helpers  | `npm run build:native`                                                         |
+| Headless pipeline test | `npx tsx scripts/test-pipeline.ts <recording-dir>`                             |
+| Headless summary test  | `npx tsx scripts/test-enhance.ts [model]`                                      |
 | Live-path replay test  | `npx tsx scripts/test-live-pipeline.ts <recording-dir> [--warm] [--summarize]` |
+| Pause capture test     | `npx tsx scripts/test-pause-capture.ts [pause-seconds]`                        |
 
 ## Architecture
 
@@ -34,12 +35,13 @@ Renderer (React, pure UI) ←window.api (preload)→ Main (Node, all I/O)
 
 ### The pipeline (stop → notes)
 
-Two WAVs → ffmpeg to 16 kHz mono → fluid-transcribe (word-timing JSON, per stream) → sentence assembly (`wordsToSegments`) → merge → SQLite → Ollama summary. With live transcription on (`liveTranscription` config, default true), most of this happens *during* the meeting: `live.ts` tail-reads the growing WAVs in ~30s chunks and `warm.ts` prefills Ollama's prefix cache after each chunk, so at Stop only the tail chunk transcribes, the pipeline skips convert+transcribe, and the summary's prefill is nearly free (measured ~80ms-1.4s vs 60-186s cold). Any live failure falls back to this batch path. The merge (`src/main/merge.ts`, the most-tested code here) aligns the two streams via wall-clock epoch anchors captured at record start, labels mic segments "Me" and system segments "Them", filters ASR hallucinations, and coalesces same-speaker runs.
+Two WAVs → ffmpeg to 16 kHz mono → fluid-transcribe (word-timing JSON, per stream) → sentence assembly (`wordsToSegments`) → merge → SQLite → Ollama summary. With live transcription on (`liveTranscription` config, default true), most of this happens _during_ the meeting: `live.ts` tail-reads the growing WAVs in ~30s chunks and `warm.ts` prefills Ollama's prefix cache after each chunk, so at Stop only the tail chunk transcribes, the pipeline skips convert+transcribe, and the summary's prefill is nearly free (measured ~80ms-1.4s vs 60-186s cold). Any live failure falls back to this batch path. The merge (`src/main/merge.ts`, the most-tested code here) aligns the two streams via wall-clock epoch anchors captured at record start, labels mic segments "Me" and system segments "Them", filters ASR hallucinations, coalesces same-speaker runs, and subtracts any paused spans so the result reads in recorded time.
 
 ## Key decisions (and why)
 
 - **Two audio streams, not one.** Mic = "Me", system audio = "Them". Speaker attribution comes free from the hardware path instead of a diarization model. Trade-off: all other participants are one "Them".
 - **Post-meeting batch transcription, no live streaming.** Massively simpler pipeline; V1 tracer-bullet decision. Audio is recorded to disk, transcription runs on Stop (at ~280× realtime the wait is seconds even for hour-long meetings).
+- **Pause mutes in place; the transcript collapses the gap.** While paused the helper keeps both devices open and writes zero samples, so the WAVs stay a faithful wall clock and the epoch-anchor alignment `merge.ts` depends on is untouched. The spans themselves come from the button presses into `session.json`, never from detecting silence — a lull in the conversation is real meeting time, and only a press marks a span as outside the meeting. `mergeTranscripts` subtracts them (required argument, so the cache warmer cannot silently skip it and void the prefill), and the duration chip, the too-short gate and the record-bar timer all follow. Releasing the devices instead would kill the lit mic indicator and the ~330 MB/hour of silence, at the cost of seconds of lost speech on every Bluetooth resume. Design, options and measurements: `docs/pause-and-resume-recording.md`.
 - **Swift helper over Chromium's loopback capture.** Electron's `getDisplayMedia` loopback on macOS is lossy (Opus) and has two unsynchronized clocks — fatal for merging. The helper gives clean PCM and one process to reason about permissions. (Granola itself uses Chromium's loopback, whose native layer also ends up on CoreAudio taps.)
 - **CoreAudio process tap over ScreenCaptureKit for system audio** (macOS 14.2+). SCK requires attaching to a display, so macOS classifies it as _screen recording_ and shows the purple indicator naming the responsible app (iTerm in dev). A `CATapDescription` mono global tap on an aggregate device delivers the same PCM under the "System Audio Recording Only" permission instead — no indicator.
 - **Apple voice processing (AEC) on the mic.** `setVoiceProcessingEnabled(true)` in `MicRecorder` — the raw input node records everything the speakers play, so without AEC the far side appears twice in the transcript (once per stream, mislabeled "Me"). Other-audio ducking is set to minimum because the system recorder captures that same audio. Analysis and A/B verification: `experiments/README.md` §3–4.
@@ -58,6 +60,7 @@ Two WAVs → ffmpeg to 16 kHz mono → fluid-transcribe (word-timing JSON, per s
 - **Bluetooth mics are slow to start.** AirPods-class devices take seconds to switch into their hands-free input profile before AVAudioEngine delivers any buffers. The helper waits up to 15 s for first buffers (was 5 s → caused `timed out waiting for first audio buffers (mic: false)`).
 - **Whisper hallucinates on silence** — famously "Thank you." / "Thanks for watching." (web-video training data). Each stream is silent ~half the meeting, so under whisper this was constant. Parakeet doesn't do this, but the defenses in `merge.ts` (bracket-filler filter, exact-phrase blocklist, repeated-run filter) are kept as cheap insurance, and the audio-level silence gate still skips dead streams entirely.
 - **Ollama model blobs can rot.** The original gpt-oss:20b blob was corrupt ("llama-server process has terminated: … failed to load model"); the fix is a full re-pull. `ollama pull` resumes partial downloads, so a retry loop survives flaky connections.
+- **The mic epoch anchor is 123–242 ms out** (issue #1, pre-existing). Both recorders stamp `firstBufferEpochMs` from `Date()` at callback-dispatch time and throw away the hardware timestamp Core Audio hands them (`MicRecorder`'s tap ignores its `AVAudioTime`; the system IO proc ignores both `AudioTimeStamp`s). Every "Me" timestamp therefore sits a fixed ~150 ms off from "Them" in every transcript. It is a bias, not drift — it does not grow with run length. Measure with `scripts/test-pause-capture.ts` before and after touching anything that affects capture timing.
 - **`timeout` does not exist in macOS shells** — use background-process + `kill` patterns in scripts.
 
 ## Roadmap state

@@ -11,6 +11,8 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 const api = {
   startRecording: (): Promise<Meeting> => ipcRenderer.invoke(IPC.recordingStart),
   stopRecording: (): Promise<Meeting> => ipcRenderer.invoke(IPC.recordingStop),
+  pauseRecording: (): Promise<void> => ipcRenderer.invoke(IPC.recordingPause),
+  resumeRecording: (): Promise<void> => ipcRenderer.invoke(IPC.recordingResume),
   retryPipeline: (meetingId: string): Promise<void> =>
     ipcRenderer.invoke(IPC.pipelineRetry, meetingId),
   listMeetings: (): Promise<Meeting[]> => ipcRenderer.invoke(IPC.meetingsList),

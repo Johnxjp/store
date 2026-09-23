@@ -68,3 +68,19 @@ export function ChevronLeftIcon() {
     </svg>
   )
 }
+
+export function PauseIcon() {
+  return (
+    <svg {...attrs}>
+      <path d="M9.5 5v14M14.5 5v14" />
+    </svg>
+  )
+}
+
+export function PlayIcon() {
+  return (
+    <svg {...attrs}>
+      <path d="M8.5 5.5 19 12 8.5 18.5Z" fill="currentColor" />
+    </svg>
+  )
+}

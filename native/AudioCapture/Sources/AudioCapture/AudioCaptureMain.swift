@@ -8,7 +8,8 @@ import Foundation
 ///    "micEpochMs":...,"systemEpochMs":...,"micSampleRate":...}
 ///   {"event":"stopped","durationMs":...}
 ///   {"event":"error","message":"..."}
-/// Stops on a "stop" line on stdin, or on stdin EOF.
+/// Stops on a "stop" line on stdin, or on stdin EOF. "pause" and "resume"
+/// lines mute and unmute both streams; the WAVs keep growing either way.
 @main
 struct AudioCaptureMain {
     static func main() async {
@@ -62,8 +63,17 @@ struct AudioCaptureMain {
 
         let startedAt = Date()
         do {
-            for try await line in FileHandle.standardInput.bytes.lines {
-                if line.trimmingCharacters(in: .whitespaces) == "stop" { break }
+            readLoop: for try await line in FileHandle.standardInput.bytes.lines {
+                switch line.trimmingCharacters(in: .whitespaces) {
+                case "stop": break readLoop
+                case "pause":
+                    mic.setPaused(true)
+                    system.setPaused(true)
+                case "resume":
+                    mic.setPaused(false)
+                    system.setPaused(false)
+                default: break
+                }
             }
         } catch {
             // stdin closed uncleanly — treat as stop

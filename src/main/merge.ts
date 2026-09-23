@@ -12,30 +12,72 @@ export interface StreamTranscript {
   epochMs: number
 }
 
+/**
+ * A span the user paused the recording for, in wall-clock epoch ms. Recorded
+ * from the pause/resume button presses, never inferred from the audio: the
+ * WAVs hold silence for natural lulls too, and those are real meeting time.
+ */
+export interface PauseInterval {
+  fromEpochMs: number
+  toEpochMs: number
+}
+
 const COALESCE_GAP_MS = 2000
 const REPEAT_RUN_THRESHOLD = 3
 
 /**
+ * Paused wall-clock ms accumulated before `absMs`. A timestamp that lands
+ * inside a pause clamps to that pause's start, so collapsed times stay
+ * monotonic and never go negative.
+ */
+export function pausedBefore(absMs: number, pauses: PauseInterval[]): number {
+  let total = 0
+  for (const p of pauses) {
+    if (absMs <= p.fromEpochMs) break
+    total += Math.min(absMs, p.toEpochMs) - p.fromEpochMs
+  }
+  return total
+}
+
+/** Carries the pause total at a segment's start so coalesce can tell a pause from a lull. */
+interface Placed extends TranscriptSegment {
+  pausedAtStart: number
+}
+
+/**
  * Merges the mic ("me") and system-audio ("them") transcripts into a single
  * chronological timeline. Timestamps become relative to the earliest stream
- * start. ASR hallucination artifacts (silence fillers, repeated phrases) are
- * dropped, and consecutive same-speaker segments are coalesced.
+ * start, with paused spans subtracted so the result reads in recorded time.
+ * ASR hallucination artifacts (silence fillers, repeated phrases) are dropped,
+ * and consecutive same-speaker segments are coalesced.
+ *
+ * `pauses` is required rather than optional on purpose: the cache warmer
+ * builds the same prompt during the meeting, and a caller that silently
+ * skipped the collapse would shift every timestamp at Stop and void the
+ * prefix cache that warming exists to fill.
  */
 export function mergeTranscripts(
   mic: StreamTranscript,
-  system: StreamTranscript
+  system: StreamTranscript,
+  pauses: PauseInterval[]
 ): TranscriptSegment[] {
   const recordingStartMs = Math.min(mic.epochMs, system.epochMs)
 
-  const toTimeline = (stream: StreamTranscript, speaker: Speaker): TranscriptSegment[] => {
-    const offset = stream.epochMs - recordingStartMs
-    return dropHallucinations(stream.segments).map((s) => ({
-      speaker,
-      startMs: s.fromMs + offset,
-      endMs: s.toMs + offset,
-      text: s.text.trim()
-    }))
-  }
+  // One event log drives both streams, so mic and system get an identical
+  // adjustment and collapsing cannot pull "Me" out of step with "Them".
+  const toTimeline = (stream: StreamTranscript, speaker: Speaker): Placed[] =>
+    dropHallucinations(stream.segments).map((s) => {
+      const startAbs = stream.epochMs + s.fromMs
+      const endAbs = stream.epochMs + s.toMs
+      const pausedAtStart = pausedBefore(startAbs, pauses)
+      return {
+        speaker,
+        startMs: startAbs - recordingStartMs - pausedAtStart,
+        endMs: endAbs - recordingStartMs - pausedBefore(endAbs, pauses),
+        text: s.text.trim(),
+        pausedAtStart
+      }
+    })
 
   const merged = [...toTimeline(mic, 'me'), ...toTimeline(system, 'them')].sort(
     (a, b) => a.startMs - b.startMs
@@ -96,16 +138,31 @@ function normalized(s: StreamSegment): string {
   return s.text.trim().toLowerCase()
 }
 
-function coalesce(segments: TranscriptSegment[]): TranscriptSegment[] {
+function coalesce(segments: Placed[]): TranscriptSegment[] {
   const out: TranscriptSegment[] = []
+  let prevPausedAtStart = -1
   for (const seg of segments) {
     const prev = out[out.length - 1]
-    if (prev && prev.speaker === seg.speaker && seg.startMs - prev.endMs < COALESCE_GAP_MS) {
+    // Differing pause totals mean a pause fell between the two. Collapsing
+    // made them adjacent in time; they were not adjacent in the meeting.
+    const sameSpan = seg.pausedAtStart === prevPausedAtStart
+    if (
+      prev &&
+      sameSpan &&
+      prev.speaker === seg.speaker &&
+      seg.startMs - prev.endMs < COALESCE_GAP_MS
+    ) {
       prev.text = `${prev.text} ${seg.text}`
       prev.endMs = Math.max(prev.endMs, seg.endMs)
     } else {
-      out.push({ ...seg })
+      out.push({
+        speaker: seg.speaker,
+        startMs: seg.startMs,
+        endMs: seg.endMs,
+        text: seg.text
+      })
     }
+    prevPausedAtStart = seg.pausedAtStart
   }
   return out
 }

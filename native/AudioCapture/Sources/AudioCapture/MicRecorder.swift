@@ -9,6 +9,7 @@ final class MicRecorder {
     private var writer: WavWriter?
     private let anchorLock = NSLock()
     private(set) var firstBufferEpochMs: Int64?
+    private var paused = false
 
     var sampleRate: Int { Int(engine.inputNode.outputFormat(forBus: 0).sampleRate) }
 
@@ -42,11 +43,25 @@ final class MicRecorder {
                 let bufferDurationMs = Int64(Double(buffer.frameLength) / format.sampleRate * 1000)
                 self.firstBufferEpochMs = Int64(Date().timeIntervalSince1970 * 1000) - bufferDurationMs
             }
+            let isPaused = self.paused
             self.anchorLock.unlock()
+            // The zero count must equal the frames the mixdown would have written:
+            // the merge timeline assumes one second of WAV is one second of wall
+            // clock, so a short fill slides the two streams apart for good.
+            if isPaused {
+                writer.append([Int16](repeating: 0, count: Int(buffer.frameLength)))
+                return
+            }
             writer.append(Self.monoInt16(from: buffer))
         }
         engine.prepare()
         try engine.start()
+    }
+
+    func setPaused(_ value: Bool) {
+        anchorLock.lock()
+        paused = value
+        anchorLock.unlock()
     }
 
     func stop() {

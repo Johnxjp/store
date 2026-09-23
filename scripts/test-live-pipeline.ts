@@ -125,7 +125,8 @@ function buildLivePrompt(): ChatPrompt | null {
   const snap = live.snapshot()
   const merged = mergeTranscripts(
     { segments: snap.mic, epochMs: anchors.micEpochMs },
-    { segments: snap.system, epochMs: anchors.systemEpochMs }
+    { segments: snap.system, epochMs: anchors.systemEpochMs },
+    anchors.pauses ?? []
   )
   const config = readConfig()
   if (formatTranscript(merged).length > config.maxTranscriptChars) return null
@@ -186,7 +187,8 @@ if (!liveResult) throw new Error('live transcription was invalidated — see log
 
 const liveMerged = mergeTranscripts(
   { segments: liveResult.mic, epochMs: anchors.micEpochMs },
-  { segments: liveResult.system, epochMs: anchors.systemEpochMs }
+  { segments: liveResult.system, epochMs: anchors.systemEpochMs },
+  anchors.pauses ?? []
 )
 await rm(scratch, { recursive: true, force: true })
 

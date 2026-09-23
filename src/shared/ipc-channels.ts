@@ -1,6 +1,8 @@
 export const IPC = {
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
+  recordingPause: 'recording:pause',
+  recordingResume: 'recording:resume',
   pipelineProgress: 'pipeline:progress',
   pipelineSummaryDelta: 'pipeline:summary-delta',
   pipelineRetry: 'pipeline:retry',

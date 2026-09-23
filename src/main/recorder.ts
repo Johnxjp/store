@@ -22,11 +22,16 @@ interface HelperEvent {
 export class Recorder {
   private child: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   private stopped: Promise<number> | null = null
+  private paused = false
 
   constructor(private readonly helperPath: string) {}
 
   get isRecording(): boolean {
     return this.child !== null
+  }
+
+  get isPaused(): boolean {
+    return this.paused
   }
 
   /** Spawns the helper; resolves with epoch anchors once both streams deliver audio. */
@@ -72,6 +77,27 @@ export class Recorder {
         resolveStopped(durationMs)
       })
     })
+  }
+
+  /**
+   * Mutes capture without releasing the audio devices: the helper keeps
+   * writing silence at real time, so the WAV stays a faithful clock and
+   * merge.ts's "one WAV second is one wall-clock second" assumption holds.
+   */
+  pause(): void {
+    this.setPaused(true)
+  }
+
+  resume(): void {
+    this.setPaused(false)
+  }
+
+  private setPaused(paused: boolean): void {
+    const child = this.child
+    if (!child) throw new Error('not recording')
+    if (this.paused === paused) return
+    this.paused = paused
+    child.stdin.write(paused ? 'pause\n' : 'resume\n')
   }
 
   /** Asks the helper to stop and waits for it to finalize the WAVs. */

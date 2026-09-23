@@ -74,6 +74,26 @@ export default function App() {
     await refresh()
   }
 
+  async function pauseRecording() {
+    setError(null)
+    try {
+      await window.api.pauseRecording()
+    } catch (e) {
+      setError(String(e))
+    }
+    await refresh()
+  }
+
+  async function resumeRecording() {
+    setError(null)
+    try {
+      await window.api.resumeRecording()
+    } catch (e) {
+      setError(String(e))
+    }
+    await refresh()
+  }
+
   async function retryPipeline(id: string) {
     // The handler kicks off the pipeline and returns once the meeting is
     // 'processing'; refreshing here swaps the error card for the status line.
@@ -109,6 +129,8 @@ export default function App() {
           stage={progress[selectedId]}
           streamText={summaryStream[selectedId]}
           onStop={stopRecording}
+          onPause={pauseRecording}
+          onResume={resumeRecording}
           onBack={() => setSelectedId(null)}
           onDelete={() => deleteMeeting(selectedId)}
           onRetry={() => void retryPipeline(selectedId)}

@@ -13,6 +13,8 @@ interface Props {
   stage?: PipelineStage
   streamText?: string
   onStop: () => void
+  onPause: () => void
+  onResume: () => void
   onBack: () => void
   onDelete: () => void
   onRetry: () => void
@@ -25,6 +27,8 @@ export function MeetingDetailView({
   stage,
   streamText,
   onStop,
+  onPause,
+  onResume,
   onBack,
   onDelete,
   onRetry,
@@ -60,7 +64,8 @@ export function MeetingDetailView({
   useEffect(() => () => clearTimeout(saveTimer.current), [])
 
   if (!detail) return <div className="note-view" />
-  const { meeting, transcript, hasAudio } = detail
+  const { meeting, transcript, hasAudio, pausedAt, pausedMs } = detail
+  const paused = pausedAt !== null
   const isRecording = meeting.status === 'recording'
   // recording_started_at is set only once audio buffers actually flow, so a
   // null value while 'recording' means capture is still spinning up.
@@ -213,7 +218,9 @@ export function MeetingDetailView({
 
               {isRecording && !isStarting && (
                 <p className="placeholder">
-                  Recording — the transcript and summary appear here when you stop.
+                  {paused
+                    ? 'Paused. The mic is muted and nothing is being recorded. macOS keeps its microphone indicator lit because the mic stays open.'
+                    : 'Recording — the transcript and summary appear here when you stop.'}
                 </p>
               )}
 
@@ -254,7 +261,15 @@ export function MeetingDetailView({
       </div>
 
       {isRecording && !isStarting && (
-        <RecordBar startedAt={meeting.recordingStartedAt ?? meeting.createdAt} onStop={onStop} />
+        <RecordBar
+          startedAt={meeting.recordingStartedAt ?? meeting.createdAt}
+          paused={paused}
+          pausedAt={pausedAt}
+          pausedMs={pausedMs}
+          onStop={onStop}
+          onPause={onPause}
+          onResume={onResume}
+        />
       )}
     </div>
   )

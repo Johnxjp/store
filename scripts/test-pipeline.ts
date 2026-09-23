@@ -19,6 +19,7 @@ const session = existsSync(sessionPath)
   ? (JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
       micEpochMs: number
       systemEpochMs: number
+      pauses?: { fromEpochMs: number; toEpochMs: number }[]
     })
   : null
 const micEpochMs = Number(process.argv[3] ?? session?.micEpochMs ?? 0)
@@ -55,6 +56,7 @@ console.error(`transcribed in ${((Date.now() - started) / 1000).toFixed(1)}s`)
 
 const segments = mergeTranscripts(
   { segments: micSegments, epochMs: micEpochMs },
-  { segments: systemSegments, epochMs: systemEpochMs }
+  { segments: systemSegments, epochMs: systemEpochMs },
+  session?.pauses ?? []
 )
 console.log(formatTranscript(segments))

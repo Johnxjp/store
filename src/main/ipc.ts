@@ -9,7 +9,7 @@ import { readConfig } from './config'
 import * as db from './db'
 import { buildSummaryPrompt, type ChatPrompt } from './enhance'
 import { LiveTranscriber, type LiveSegments } from './live'
-import { formatTranscript, mergeTranscripts } from './merge'
+import { formatTranscript, mergeTranscripts, type PauseInterval } from './merge'
 import { audioCaptureBin, recordingsDir } from './paths'
 import {
   runPipeline,
@@ -23,6 +23,8 @@ import { SummaryWarmer } from './warm'
 interface Session {
   recorder: Recorder
   meetingId: string
+  /** Where the WAVs and session.json live. */
+  dir: string
   /** Resolves true once capture is live (anchors written), false if it failed to start. */
   starting: Promise<boolean>
   /** Transcribes during the meeting; null until capture is live (or when disabled by config). */
@@ -31,6 +33,29 @@ interface Session {
   warmer: SummaryWarmer | null
   /** Title at recording start; every warm and the final summary prompt use it (renames would void the cache). */
   promptTitle: string | null
+  /** Epoch anchors once capture is live; null while it spins up. */
+  anchors: SessionAnchors | null
+  /** Closed pause spans, in press order. */
+  pauses: PauseInterval[]
+  /** When the current pause began, or null while capture is running. */
+  pausedAt: number | null
+}
+
+function totalPausedMs(pauses: PauseInterval[]): number {
+  return pauses.reduce((sum, p) => sum + (p.toEpochMs - p.fromEpochMs), 0)
+}
+
+/**
+ * Freezes the session's pause spans to disk and to the meeting row, closing
+ * an open pause at the current instant. The pipeline collapses the transcript
+ * using session.json and the duration label reads the DB total, so both have
+ * to land before either runs.
+ */
+async function persistPauses(sess: Session): Promise<void> {
+  const pauses = [...sess.pauses]
+  if (sess.pausedAt !== null) pauses.push({ fromEpochMs: sess.pausedAt, toEpochMs: Date.now() })
+  if (sess.anchors) await writeSessionFile(sess.dir, { ...sess.anchors, pauses })
+  db.setPausedMs(sess.meetingId, totalPausedMs(pauses))
 }
 
 let session: Session | null = null
@@ -44,13 +69,15 @@ let session: Session | null = null
 export function abortActiveRecording(): Promise<void> | null {
   if (!session) return null
   const { recorder, meetingId, live, warmer } = session
+  const active = session
   session = null
   warmer?.stop()
   live?.cancel()
   return recorder
     .stop()
     .catch(() => {})
-    .then(() => {
+    .then(async () => {
+      await persistPauses(active)
       db.setRecordingEnded(meetingId, Date.now())
       db.setMeetingStatus(
         meetingId,
@@ -90,6 +117,7 @@ export function registerIpcHandlers(): void {
       async (anchors) => {
         await writeSessionFile(dir, anchors)
         db.setRecordingStarted(id, Math.min(anchors.micEpochMs, anchors.systemEpochMs))
+        if (session?.meetingId === id) session.anchors = anchors
         // A fast Stop (or quit) during capture spin-up already tore the
         // session down — starting the live loop then would leak it.
         if (session?.meetingId === id && readConfig().liveTranscription) {
@@ -100,7 +128,7 @@ export function registerIpcHandlers(): void {
           })
           sess.live = live
           sess.warmer = new SummaryWarmer(() =>
-            buildWarmPrompt(live.snapshot(), anchors, promptTitle, meeting.createdAt)
+            buildWarmPrompt(live.snapshot(), anchors, sess.pauses, promptTitle, meeting.createdAt)
           )
           sess.promptTitle = promptTitle
           live.start()
@@ -118,7 +146,18 @@ export function registerIpcHandlers(): void {
         return false
       }
     )
-    session = { recorder, meetingId: id, starting, live: null, warmer: null, promptTitle: null }
+    session = {
+      recorder,
+      meetingId: id,
+      dir,
+      starting,
+      live: null,
+      warmer: null,
+      promptTitle: null,
+      anchors: null,
+      pauses: [],
+      pausedAt: null
+    }
     return meeting
   })
 
@@ -141,6 +180,7 @@ export function registerIpcHandlers(): void {
         throw err
       }
       db.setRecordingEnded(active.meetingId, Date.now())
+      await persistPauses(active)
 
       // finish() is not awaited here — that would hold the meeting in
       // 'recording' while the tail chunks transcribe. The pipeline awaits it
@@ -151,6 +191,24 @@ export function registerIpcHandlers(): void {
       }).catch(() => {})
     }
     return db.getMeeting(active.meetingId)!
+  })
+
+  ipcMain.handle(IPC.recordingPause, (): void => {
+    if (!session) throw new Error('not recording')
+    if (session.pausedAt !== null) return
+    session.recorder.pause()
+    session.pausedAt = Date.now()
+  })
+
+  // Persisting on resume rather than only at Stop means a crash mid-meeting
+  // still collapses every pause that had already finished.
+  ipcMain.handle(IPC.recordingResume, async (): Promise<void> => {
+    if (!session) throw new Error('not recording')
+    if (session.pausedAt === null) return
+    session.recorder.resume()
+    session.pauses.push({ fromEpochMs: session.pausedAt, toEpochMs: Date.now() })
+    session.pausedAt = null
+    await persistPauses(session)
   })
 
   ipcMain.handle(IPC.pipelineRetry, async (event, meetingId: string): Promise<void> => {
@@ -165,7 +223,16 @@ export function registerIpcHandlers(): void {
     const hasAudio =
       meeting.audioDir !== null &&
       ['mic.wav', 'system.wav', 'session.json'].every((f) => existsSync(join(meeting.audioDir!, f)))
-    return { meeting, transcript: db.getTranscript(id), hasAudio }
+    const live = session?.meetingId === id ? session : null
+    return {
+      meeting,
+      transcript: db.getTranscript(id),
+      hasAudio,
+      pausedAt: live?.pausedAt ?? null,
+      // Excludes any pause still open, which is what lets the record bar
+      // freeze its timer at pausedAt without polling for updates.
+      pausedMs: live ? totalPausedMs(live.pauses) : meeting.pausedMs
+    }
   })
 
   ipcMain.handle(IPC.meetingsRename, (_event, id: string, title: string): void => {
@@ -201,12 +268,14 @@ export function registerIpcHandlers(): void {
 function buildWarmPrompt(
   segments: LiveSegments,
   anchors: SessionAnchors,
+  pauses: PauseInterval[],
   title: string,
   createdAt: number
 ): ChatPrompt | null {
   const merged = mergeTranscripts(
     { segments: segments.mic, epochMs: anchors.micEpochMs },
-    { segments: segments.system, epochMs: anchors.systemEpochMs }
+    { segments: segments.system, epochMs: anchors.systemEpochMs },
+    pauses
   )
   const config = readConfig()
   if (formatTranscript(merged).length > config.maxTranscriptChars) return null

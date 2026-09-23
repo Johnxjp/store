@@ -4,7 +4,7 @@ import type { PipelineStage } from '../shared/types'
 import { readConfig } from './config'
 import * as db from './db'
 import { buildSummaryPrompt, extractPartialSummary, extractSummary, generateNotes } from './enhance'
-import { mergeTranscripts, type StreamSegment } from './merge'
+import { mergeTranscripts, type PauseInterval, type StreamSegment } from './merge'
 import {
   boostGainDb,
   convertTo16k,
@@ -29,6 +29,8 @@ export interface PipelineOptions {
 export interface SessionAnchors {
   micEpochMs: number
   systemEpochMs: number
+  /** Spans the user paused for. Absent in files written before pause existed. */
+  pauses?: PauseInterval[]
 }
 
 /** Persisted next to the WAVs so a failed pipeline can be retried later. */
@@ -120,7 +122,8 @@ export async function runPipeline(
       onProgress('merging')
       segments = mergeTranscripts(
         { segments: micSegments, epochMs: anchors.micEpochMs },
-        { segments: systemSegments, epochMs: anchors.systemEpochMs }
+        { segments: systemSegments, epochMs: anchors.systemEpochMs },
+        anchors.pauses ?? []
       )
       db.saveTranscript(meetingId, segments)
 
@@ -133,10 +136,12 @@ export async function runPipeline(
     }
 
     // Third gate: recordings shorter than 30s rarely have enough content to
-    // summarize meaningfully, and the LLM tends to hallucinate structure onto them.
+    // summarize meaningfully, and the LLM tends to hallucinate structure onto
+    // them. Paused time is subtracted: wall clock would wave through ten
+    // seconds of speech wrapped in an hour-long pause.
     const durationMs =
       meeting.recordingStartedAt != null && meeting.recordingEndedAt != null
-        ? meeting.recordingEndedAt - meeting.recordingStartedAt
+        ? meeting.recordingEndedAt - meeting.recordingStartedAt - meeting.pausedMs
         : null
     if (durationMs !== null && durationMs < 30_000) {
       db.setEnhancedNotes(meetingId, '_Transcript too short to generate a summary._')

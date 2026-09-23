@@ -560,10 +560,29 @@ input {
   animation-delay: 0.12s;
 }
 
+.level-bars.paused span {
+  animation-play-state: paused;
+  background: var(--ink-faint);
+}
+
 .record-timer {
   font-variant-numeric: tabular-nums;
   color: var(--ink-mid);
   font-weight: 500;
+}
+
+.pause-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--ink-mid);
+}
+
+.pause-btn:hover {
+  background: var(--bg);
+  color: var(--ink);
 }
 
 .stop-btn {

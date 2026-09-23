@@ -13,6 +13,7 @@ final class SystemAudioRecorder {
     private var writer: WavWriter?
     private let anchorLock = NSLock()
     private(set) var firstBufferEpochMs: Int64?
+    private var paused = false
     private var sampleRate = 48000
     private var channels = 1
 
@@ -77,6 +78,12 @@ final class SystemAudioRecorder {
         }
     }
 
+    func setPaused(_ value: Bool) {
+        anchorLock.lock()
+        paused = value
+        anchorLock.unlock()
+    }
+
     func stop() async {
         if let ioProcID, aggregateID != AudioObjectID(kAudioObjectUnknown) {
             AudioDeviceStop(aggregateID, ioProcID)
@@ -107,19 +114,27 @@ final class SystemAudioRecorder {
         let ch = max(1, channels)
         let frames = totalFloats / ch
         guard frames > 0 else { return }
-        let samples: [Int16] = (0..<frames).map { i in
-            var sum: Float = 0
-            for c in 0..<ch { sum += floats[i * ch + c] }
-            let v = max(-1, min(1, sum / Float(ch)))
-            return Int16(v * Float(Int16.max))
-        }
 
         anchorLock.lock()
         if firstBufferEpochMs == nil {
             let bufferDurationMs = Int64(Double(frames) / Double(sampleRate) * 1000)
             firstBufferEpochMs = Int64(Date().timeIntervalSince1970 * 1000) - bufferDurationMs
         }
+        let isPaused = paused
         anchorLock.unlock()
+
+        // Zero count must equal `frames`, for the reason in MicRecorder's gate.
+        if isPaused {
+            writer?.append([Int16](repeating: 0, count: frames))
+            return
+        }
+
+        let samples: [Int16] = (0..<frames).map { i in
+            var sum: Float = 0
+            for c in 0..<ch { sum += floats[i * ch + c] }
+            let v = max(-1, min(1, sum / Float(ch)))
+            return Int16(v * Float(Int16.max))
+        }
         writer?.append(samples)
     }
 }

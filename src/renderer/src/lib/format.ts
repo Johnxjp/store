@@ -33,6 +33,7 @@ export function timeLabel(ts: number): string {
 
 export function durationLabel(meeting: Meeting): string | null {
   if (!meeting.recordingStartedAt || !meeting.recordingEndedAt) return null
-  const mins = Math.round((meeting.recordingEndedAt - meeting.recordingStartedAt) / 60_000)
+  const recordedMs = meeting.recordingEndedAt - meeting.recordingStartedAt - meeting.pausedMs
+  const mins = Math.round(recordedMs / 60_000)
   return mins < 1 ? 'Under a minute' : `${mins} min`
 }

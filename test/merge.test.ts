@@ -13,7 +13,8 @@ describe('mergeTranscripts', () => {
   it('interleaves mic and system segments chronologically', () => {
     const result = mergeTranscripts(
       { segments: [seg(0, 2000, 'hello'), seg(10_000, 12_000, 'sounds good')], epochMs: 1000 },
-      { segments: [seg(4000, 6000, 'hi there')], epochMs: 1000 }
+      { segments: [seg(4000, 6000, 'hi there')], epochMs: 1000 },
+      []
     )
     expect(result.map((s) => [s.speaker, s.text])).toEqual([
       ['me', 'hello'],
@@ -26,7 +27,8 @@ describe('mergeTranscripts', () => {
     // System stream started 3s after mic: its segments shift +3000ms.
     const result = mergeTranscripts(
       { segments: [seg(0, 1000, 'first')], epochMs: 10_000 },
-      { segments: [seg(0, 1000, 'second')], epochMs: 13_000 }
+      { segments: [seg(0, 1000, 'second')], epochMs: 13_000 },
+      []
     )
     expect(result[0]).toMatchObject({ speaker: 'me', startMs: 0 })
     expect(result[1]).toMatchObject({ speaker: 'them', startMs: 3000, endMs: 4000 })
@@ -38,7 +40,8 @@ describe('mergeTranscripts', () => {
         segments: [seg(0, 2000, 'one'), seg(2500, 4000, 'two'), seg(9000, 10_000, 'far away')],
         epochMs: 0
       },
-      { segments: [], epochMs: 0 }
+      { segments: [], epochMs: 0 },
+      []
     )
     expect(result).toHaveLength(2)
     expect(result[0]).toMatchObject({ text: 'one two', startMs: 0, endMs: 4000 })
@@ -48,7 +51,8 @@ describe('mergeTranscripts', () => {
   it('does not coalesce across a speaker change', () => {
     const result = mergeTranscripts(
       { segments: [seg(0, 1000, 'a'), seg(3000, 4000, 'b')], epochMs: 0 },
-      { segments: [seg(1500, 2500, 'x')], epochMs: 0 }
+      { segments: [seg(1500, 2500, 'x')], epochMs: 0 },
+      []
     )
     expect(result.map((s) => s.text)).toEqual(['a', 'x', 'b'])
   })
@@ -56,9 +60,71 @@ describe('mergeTranscripts', () => {
   it('handles an empty stream', () => {
     const result = mergeTranscripts(
       { segments: [], epochMs: 0 },
-      { segments: [seg(0, 1000, 'only them')], epochMs: 0 }
+      { segments: [seg(0, 1000, 'only them')], epochMs: 0 },
+      []
     )
     expect(result).toEqual([{ speaker: 'them', startMs: 0, endMs: 1000, text: 'only them' }])
+  })
+})
+
+describe('mergeTranscripts with pauses', () => {
+  const pause = (fromEpochMs: number, toEpochMs: number) => ({ fromEpochMs, toEpochMs })
+
+  it('subtracts a pause from everything recorded after it', () => {
+    const result = mergeTranscripts(
+      { segments: [seg(0, 1000, 'before'), seg(20_000, 21_000, 'after')], epochMs: 0 },
+      { segments: [], epochMs: 0 },
+      [pause(5000, 15_000)]
+    )
+    expect(result[0]).toMatchObject({ startMs: 0, endMs: 1000 })
+    expect(result[1]).toMatchObject({ startMs: 10_000, endMs: 11_000 })
+  })
+
+  it('shifts both streams identically, so a pause cannot pull them out of step', () => {
+    // Same wall-clock instant, reached from different stream epochs.
+    const result = mergeTranscripts(
+      { segments: [seg(20_000, 21_000, 'me')], epochMs: 0 },
+      { segments: [seg(17_000, 18_000, 'them')], epochMs: 3000 },
+      [pause(5000, 15_000)]
+    )
+    expect(result.map((s) => s.startMs)).toEqual([10_000, 10_000])
+  })
+
+  it('does not coalesce same-speaker segments across a pause boundary', () => {
+    // Collapsing leaves a 500ms gap, well inside the 2s coalesce window.
+    const result = mergeTranscripts(
+      { segments: [seg(0, 1000, 'one'), seg(60_500, 61_500, 'two')], epochMs: 0 },
+      { segments: [], epochMs: 0 },
+      [pause(1000, 60_000)]
+    )
+    expect(result.map((s) => s.text)).toEqual(['one', 'two'])
+  })
+
+  it('clamps a timestamp that lands inside a pause to the pause start', () => {
+    const result = mergeTranscripts(
+      { segments: [seg(8000, 9000, 'straggler')], epochMs: 0 },
+      { segments: [], epochMs: 0 },
+      [pause(5000, 15_000)]
+    )
+    expect(result[0]).toMatchObject({ startMs: 5000, endMs: 5000 })
+  })
+
+  it('shortens a segment that spans a pause to its recorded duration', () => {
+    const result = mergeTranscripts(
+      { segments: [seg(4000, 16_000, 'across')], epochMs: 0 },
+      { segments: [], epochMs: 0 },
+      [pause(5000, 15_000)]
+    )
+    expect(result[0]).toMatchObject({ startMs: 4000, endMs: 6000 })
+  })
+
+  it('accumulates several pauses', () => {
+    const result = mergeTranscripts(
+      { segments: [seg(10_000, 11_000, 'last')], epochMs: 0 },
+      { segments: [], epochMs: 0 },
+      [pause(1000, 2000), pause(5000, 7000)]
+    )
+    expect(result[0]).toMatchObject({ startMs: 7000, endMs: 8000 })
   })
 })
 

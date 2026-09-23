@@ -1,6 +1,6 @@
 import { appendFile, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { wrapWav } from '../src/main/chunker'
 import { LiveTranscriber } from '../src/main/live'
@@ -115,5 +115,49 @@ describe('LiveTranscriber', () => {
     live.cancel()
     await expect(live.finish()).resolves.toBeNull()
     expect(transcribeWav).not.toHaveBeenCalled()
+  })
+
+  // A pause is silence on both streams. The WAVs keep growing at real time, so
+  // the chunk after one must still start at its true offset — if a skipped
+  // chunk's duration went missing here, every timestamp after a pause would
+  // slide earlier and the notes would point at the wrong moments.
+  it('keeps segment offsets across a skipped silent chunk', async () => {
+    const dir = await makeDir()
+    const live = new LiveTranscriber(dir, OPTS)
+
+    // 0.9s is exactly one chunk, so each piece lands in its own chunk:
+    // tone, silence (the pause), tone.
+    await writeFile(join(dir, 'mic.wav'), wrapWav(tone(0.9, 16000), 16000))
+    await writeFile(join(dir, 'system.wav'), wrapWav(tone(0.9, 48000), 48000))
+    await live.tickOnce()
+
+    await appendFile(join(dir, 'mic.wav'), tone(0.9, 16000, 0))
+    await appendFile(join(dir, 'system.wav'), tone(0.9, 48000, 0))
+    await live.tickOnce() // 1.8s buffered -> chunk 0 (tone) cut at 0.9s
+
+    await appendFile(join(dir, 'mic.wav'), tone(0.9, 16000))
+    await appendFile(join(dir, 'system.wav'), tone(0.9, 48000))
+    await live.tickOnce() // 1.8s buffered -> chunk 1 (the pause) cut at 0.9s
+
+    const result = await live.finish() // flushes the tail tone as chunk 2
+
+    // Chunk 1 (900-1800ms) never transcribes, yet chunk 2's segment still
+    // starts at 1800ms rather than sliding up to 900ms.
+    const expected = [
+      { fromMs: 0, toMs: 500, text: 'hello' },
+      { fromMs: 1800, toMs: 2300, text: 'hello' }
+    ]
+    expect(result).toEqual({ mic: expected, system: expected })
+
+    const transcribed = vi
+      .mocked(transcribeWav)
+      .mock.calls.map(([path]) => basename(path))
+      .sort()
+    expect(transcribed).toEqual([
+      'mic-0-16k.wav',
+      'mic-2-16k.wav',
+      'system-0-16k.wav',
+      'system-2-16k.wav'
+    ])
   })
 })
