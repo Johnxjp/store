@@ -31,14 +31,19 @@ const execFileAsync = promisify(execFile)
 
 const WAV_HEADER_BYTES = 44
 /**
- * Absorbs the helper's final buffer and the jitter in the mic's start anchor
- * (measured at up to ~250 ms on this machine). A frame-count error in the
- * zero-fill is proportional to the pause, so over the default two minutes it
- * lands far outside this.
+ * Absorbs the mic's dropped tail: the tap only delivers whole 4096-frame
+ * buffers, so up to one buffer is lost at Stop (100 ms built-in, 256 ms on a
+ * 16 kHz Bluetooth headset). A frame-count error in the zero-fill is
+ * proportional to the pause, so over the default two minutes it lands far
+ * outside this.
  */
 export const DURATION_TOLERANCE_MS = 300
-/** Drift that hits both streams equally still breaks the merge, so they are compared to each other too. */
-export const STREAM_SKEW_TOLERANCE_MS = 100
+/**
+ * Drift that hits both streams equally still breaks the merge, so they are
+ * compared to each other too. Same tolerance: the dropped tail buffer shows up
+ * here as the mic ending early.
+ */
+export const STREAM_SKEW_TOLERANCE_MS = 300
 /** The gate takes effect within one buffer (~10 ms); this keeps boundary audio out of the measured windows. */
 const GATE_GUARD_MS = 250
 /** One 16-bit LSB is -90.3 dB, so only true zeros pass. */

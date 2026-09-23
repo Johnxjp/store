@@ -67,21 +67,33 @@ about healthy recordings.
 - Cross-stream end skew, mic against system: −254, −32, −113, −145 ms.
 - Each mic WAV runs short against its own start anchor by 123 to 242 ms. The
   system stream sits the other way, at +12 to +22 ms.
-- The offset is a fixed bias rather than clock drift. It does not grow with run
-  length: −242 ms over a 12 s run, −123 ms over a 40 s one.
 
-Tracked as issue #1, out of scope here. The leading suspect is that both
-recorders discard the hardware timestamp and use `Date()` at callback-dispatch
-time: the tap closure in `MicRecorder` ignores its `AVAudioTime` parameter, and
-the IO proc in `SystemAudioRecorder` ignores both its `AudioTimeStamp` ones. A
-wall-clock reading taken at dispatch carries thread scheduling and driver
-latency, which is the shape of the error measured. `AudioCaptureMain` calling
-`mic.stop()` before `await system.stop()` adds a smaller tail contribution.
+This was first read as a start-anchor error and filed as issue #1. Instrumenting
+the helper with hardware timestamps and sample counts (2026-09-23) showed it is
+the tail, not the head. The start anchor is right to within 5 ms on a Bluetooth
+headset and 10 ms on the built-in mic. The mic tap only hands over whole
+4096-frame buffers, and `removeTap` discards the one being filled when Stop
+arrives: every mic WAV is an exact multiple of one buffer. On the built-in mic
+at 48 kHz a buffer is 100 ms; on a Bluetooth headset in its 16 kHz voice
+profile it is 256 ms, which is where the large numbers came from (the four
+captures above were made with a Sony WH-1000XM3). The shortfall lands anywhere
+between zero and one buffer depending on where the press falls in the fill
+cycle, so it only looked like a fixed bias across four runs.
 
-This bias already shifts every "Me" timestamp in every transcript the app has
-ever produced, so it is a known issue on its own terms rather than a regression
-this feature introduces. Fixing it means touching the same capture code pause
-just landed on, which is why it is deliberately separate.
+What that costs:
+
+- Transcript timing: nothing. `merge.ts` places every segment from the start
+  anchor and never looks at where a WAV ends. No recording is misaligned.
+- Up to one buffer of the user's own voice after the Stop press is lost.
+- The pause boundary lag below is up to one buffer too: 256 ms on Bluetooth,
+  not the ~85 ms first assumed.
+- The harness's end-of-file checks read the missing tail as a short WAV and as
+  misalignment, so both tolerate 300 ms for it.
+
+Left as is. Shrinking `bufferSize:` in `MicRecorder` would bound both the loss
+and the pause lag to 64 ms on Bluetooth if either ever matters. Hardware
+timestamps for the anchors would gain 5 to 20 ms and are not worth touching the
+alignment code for.
 
 A fifth capture exercised the feature itself: 10 s of audio, 20 s paused, 10 s
 more. Both WAVs hold exact digital silence across the paused window with audio
@@ -163,11 +175,12 @@ by appending them in order.
 **This is alignment-preserving by construction.** The subtraction comes from one
 stream-agnostic event log, so mic and system receive the identical adjustment
 and the collapse structurally cannot pull "Me" out of step with "Them". The
-logged boundary does lag the actual mute by up to one buffer, ~85 ms on the mic
-and ~10 ms on the tap, but that shifts everything after a pause uniformly by
-under 100 ms. Contrast the rejected option of writing no bytes at all while
-paused, where the same boundary timing bakes separately into each stream's byte
-count with no way to correct it afterwards.
+logged boundary does lag the actual mute by up to one buffer, 100 ms on the
+built-in mic, 256 ms on a 16 kHz Bluetooth headset and ~10 ms on the tap, but
+that shifts everything after a pause uniformly by under one buffer. Contrast
+the rejected option of writing no bytes at all while paused, where the same
+boundary timing bakes separately into each stream's byte count with no way to
+correct it afterwards.
 
 **Coalescing does not cross a pause boundary.** `coalesce` glues adjacent
 same-speaker segments that sit within 2 s of each other, and the collapse can
@@ -218,10 +231,10 @@ because:
   list, `hasAudio` would change, and the replay harness assumes one directory.
 
 Per-segment drift was the original headline argument against it. The
-measurements above weaken that one: the per-run alignment error is a fixed bias
-of a couple hundred milliseconds and does not accumulate, which is smaller than
-the baseline error the app already carries on every "Me" timestamp. Resume
-latency is the reason this option stays rejected.
+measurements above weaken that one: the start anchors are good to 5 to 20 ms,
+so each extra segment would carry an error of that size, not the hundreds of
+milliseconds first feared. Resume latency is the reason this option stays
+rejected.
 
 Stitching segments back together with ffmpeg padding was also considered. It
 buys nothing over normalising timestamps at the seam, and it breaks the live
@@ -481,13 +494,15 @@ Then assert:
 1. Each WAV's `ffprobe` duration equals the wall-clock length of the run, within
    ~300 ms. This is the drift check. Measure the run from the moment `stop` is
    written rather than from helper exit: teardown adds a roughly constant
-   145 ms that has nothing to do with the audio.
+   145 ms that has nothing to do with the audio. The mic always comes in short
+   by up to one tap buffer (see "What the hardware actually delivers"), which
+   the tolerance has to absorb.
 2. The two WAVs agree with each other within **~300 ms**, not the ±100 ms this
    document first specified. Measured cross-stream end skew on four clean
    captures was −254, −32, −113 and −145 ms, so a ±100 ms gate fails on healthy
-   runs. The bias is fixed rather than accumulating, so the wide tolerance still
-   catches a proportional zero-fill error, which is the failure the check exists
-   for.
+   runs: the mic's dropped tail buffer is up to 256 ms on Bluetooth. That loss
+   is bounded rather than accumulating, so the wide tolerance still catches a
+   proportional zero-fill error, which is the failure the check exists for.
 3. Peak level across the paused window sits at the 16-bit floor (~−91 dB, which
    `transcribe.ts` already treats as a dead stream) on both streams.
 4. Peak level outside the paused window does not.
@@ -592,10 +607,10 @@ in it.
   lags the actual mute by up to one buffer, so a word can land just inside the
   pause. At warm time that pause is still open and absent from the log, so the
   word reads uncollapsed; at Stop the closed interval clamps it to the pause
-  start. Timestamps render to the second, so an ~85 ms shift changes the prompt
-  only when it crosses a second boundary, and only from that line onward. The
-  cost is a partial prefill rather than a cold one, which is why this is
-  recorded rather than engineered around.
+  start. Timestamps render to the second, so a shift of under one buffer changes
+  the prompt only when it crosses a second boundary, and only from that line
+  onward. The cost is a partial prefill rather than a cold one, which is why
+  this is recorded rather than engineered around.
 - **Chunk straddling a pause boundary.** Contains real speech plus silence, so
   `peakDb` sees the speech and it transcribes normally. Words inside the paused
   part of that chunk are silence, so there are none; a word whose timing lands
